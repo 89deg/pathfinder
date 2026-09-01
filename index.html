@@ -438,10 +438,11 @@ const S = {
   queue:[], idx:0, score:0,
   cwd:[], history:[], expanded:{}, selected:null, typed:'',
   hintShown:false, fb:null, log:[], found:[], wrong:0, flash:null,
-  backTo:'start', vw: window.innerWidth,
+  backTo:'start', vw: window.innerWidth, red:'#85222C',
   regOn:false, phase:1,                       /* registry-search add-on (Level 1, Windows) */
   rCwd:[], rHistory:[], rExpanded:{}, rSelected:null,
   more:null,                                  /* artifact id whose "tell me more" dialog is open */
+  sheet:false, peek:false,                    /* mobile: task sheet open / peeking at a revealed path during feedback */
 };
 
 const MORE = {
@@ -620,6 +621,7 @@ function ART(){ return cfg().art.filter(present); }
 function art(id){ return ART().find(a => a.id === id); }
 function isMulti(){ return S.level === 2 || S.level === 4; }
 function isExpert(){ return S.level === 3 || S.level === 4; }
+function isMobile(){ return S.vw < 760; }
 
 function catMatch(item){ return S.cat === 'all' || item.cat === S.cat; }
 
@@ -1013,8 +1015,28 @@ function startScreen(){
 }
 function label(t){ return '<div class="mono" style="margin-top:30px;font-size:12px;letter-spacing:.6px;color:var(--grey)">'+E(t)+'</div>'; }
 
+/* shared feedback rows (desktop + mobile) */
+function fbRows(fb, multi){
+  let rows = '';
+  (fb.rows||[]).forEach(id => { const a = art(id);
+    const got = fb.found ? fb.found.indexOf(id)>=0 : fb.ok;
+    const ic = got ? {n:'check',c:'#0E7A4A'} : (multi?{n:'dashed',c:'#777'}:{n:'x',c:S.red});
+    rows += '<div style="display:flex;gap:10px;padding-top:12px;border-top:1px solid rgba(0,0,0,.08)">'
+      + icon(ic.n, ic.c, 17)
+      + '<div style="min-width:0"><div style="font-size:18px;font-weight:600">'+E(a.name)+'</div>'
+      + '<div class="mono revpath link" data-act="reveal" data-rel="'+A(a.rel)+'" data-prefix="'+(a.prefix?'1':'')+'" title="open this location" style="font-size:12px;color:var(--green);word-break:break-all">'+E(relToDisplay(a.rel))+' ↗</div>'
+      + (fb.reg && REG[id] ? '<div class="mono revpath link" data-act="rreveal" data-key="'+A(REG[id].key)+'" title="open this key" style="font-size:12px;color:var(--green);word-break:break-all;margin-top:2px">'+E(regDisplay(id))+' ↗</div>' : '')
+      + '<div style="font-size:15px;line-height:21px;color:#444;margin-top:6px;overflow-wrap:anywhere">'+E(a.why)+'</div>'
+      + (fb.reg && REG[id] ? '<div style="font-size:14px;line-height:20px;color:#666;margin-top:6px;overflow-wrap:anywhere">'+E(REG[id].note)+'</div>' : '')
+      + '<div class="mono" style="font-size:13px;color:#555;margin-top:5px;overflow-wrap:anywhere">Parse with '+E(a.tool)+'</div>'
+      + '<div style="margin-top:8px"><span class="link" data-act="more" data-id="'+A(id)+'" style="display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:600;color:var(--green)">'+icon('target','#0E7A4A',14)+'Tell me more</span></div></div></div>';
+  });
+  return rows;
+}
+
 /* ------ game screen ------ */
 function gameScreen(){
+  if (isMobile()) return mobileGame();
   const c = cfg(), multi = isMulti(), expert = isExpert();
   const q = cur();
   if (!q) return '<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted)">No questions in this pool.</div>';
@@ -1114,26 +1136,12 @@ function gameScreen(){
     /* feedback */
     const fb = S.fb, col = fb.ok ? '#155537' : S.red;
     const title = fb.ok ? (multi?'Case closed':'Correct') : (multi?'Revealed':'Not this one');
-    let rows = '';
-    (fb.rows||[]).forEach(id => { const a = art(id);
-      const got = fb.found ? fb.found.indexOf(id)>=0 : fb.ok;
-      const ic = got ? {n:'check',c:'#0E7A4A'} : (multi?{n:'dashed',c:'#777'}:{n:'x',c:S.red});
-      rows += '<div style="display:flex;gap:10px;padding-top:12px;border-top:1px solid rgba(0,0,0,.08)">'
-        + icon(ic.n, ic.c, 17)
-        + '<div style="min-width:0"><div style="font-size:18px;font-weight:600">'+E(a.name)+'</div>'
-        + '<div class="mono revpath link" data-act="reveal" data-rel="'+A(a.rel)+'" data-prefix="'+(a.prefix?'1':'')+'" title="open this location" style="font-size:12px;color:var(--green);word-break:break-all">'+E(relToDisplay(a.rel))+' ↗</div>'
-        + (fb.reg && REG[id] ? '<div class="mono revpath link" data-act="rreveal" data-key="'+A(REG[id].key)+'" title="open this key" style="font-size:12px;color:var(--green);word-break:break-all;margin-top:2px">'+E(regDisplay(id))+' ↗</div>' : '')
-        + '<div style="font-size:15px;line-height:21px;color:#444;margin-top:6px;overflow-wrap:anywhere">'+E(a.why)+'</div>'
-        + (fb.reg && REG[id] ? '<div style="font-size:14px;line-height:20px;color:#666;margin-top:6px;overflow-wrap:anywhere">'+E(REG[id].note)+'</div>' : '')
-        + '<div class="mono" style="font-size:13px;color:#555;margin-top:5px;overflow-wrap:anywhere">Parse with '+E(a.tool)+'</div>'
-        + '<div style="margin-top:8px"><span class="link" data-act="more" data-id="'+A(id)+'" style="display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:600;color:var(--green)">'+icon('target','#0E7A4A',14)+'Tell me more</span></div></div></div>';
-    });
     const lastQ = S.idx >= S.queue.length-1;
     const bg = fb.ok ? '#E8F3EC' : '#FBEAEC';
     panel += '<div style="border-radius:8px;padding:16px 18px;background:'+bg+';border-left:4px solid '+col+'">'
       + '<div style="display:flex;align-items:center;gap:10px">'+icon(fb.ok?'check':'x', col, 22)+'<div style="font-size:23px;font-weight:600;color:'+col+'">'+E(title)+'</div></div>'
       + (fb.why?'<div style="font-size:16px;line-height:23px;color:#444;margin-top:10px;overflow-wrap:anywhere">'+E(fb.why)+'</div>':'')
-      + '<div style="display:flex;flex-direction:column;gap:12px;margin-top:14px">'+rows+'</div>'
+      + '<div style="display:flex;flex-direction:column;gap:12px;margin-top:14px">'+fbRows(fb, multi)+'</div>'
       + '<button class="btn'+(fb.ok?'':' danger')+'" data-act="next" style="margin-top:16px">'+(lastQ?'See results':(multi?'Next case':'Next artifact'))+'</button></div>';
   }
   panel += '</div>';
@@ -1162,6 +1170,179 @@ function moreModal(){
     + (bullets ? '<ul style="margin:14px 0 0;padding-left:20px;font-size:15px;color:#3d3d3d">'+bullets+'</ul>' : '')
     + '<div class="mono" style="font-size:13px;color:#555;margin-top:18px;padding-top:14px;border-top:1px solid var(--line);overflow-wrap:anywhere">Parse with '+E(a.tool)+'</div>'
     + '<div style="margin-top:16px;text-align:right"><button class="btn sm" data-act="moreClose">Got it</button></div>'
+    + '</div></div>';
+}
+
+/* ============================ mobile game (< 760px) ======================= */
+function mobileGame(){
+  const q = cur();
+  if (!q) return '<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);padding:24px;text-align:center">No questions in this pool.</div>';
+  const multi = isMulti(), expert = isExpert(), need = multi ? q.need : 1;
+  const twoPhase = regActive() && regCapable(q.id);
+
+  /* feedback takes over the screen (unless peeking at a revealed path) */
+  if (S.fb && !S.peek){
+    const fb = S.fb, col = fb.ok ? '#155537' : S.red, bg = fb.ok ? '#E8F3EC' : '#FBEAEC';
+    const title = fb.ok ? (multi?'Case closed':'Correct') : (multi?'Revealed':'Not this one');
+    const lastQ = S.idx >= S.queue.length-1;
+    const body = '<div style="flex:1;min-height:0;overflow-y:auto;padding:16px">'
+      + '<div style="border-radius:8px;padding:16px 18px;background:'+bg+';border-left:4px solid '+col+'">'
+      + '<div style="display:flex;align-items:center;gap:10px">'+icon(fb.ok?'check':'x', col, 22)+'<div style="font-size:22px;font-weight:600;color:'+col+'">'+E(title)+'</div></div>'
+      + (fb.why?'<div style="font-size:15px;line-height:22px;color:#444;margin-top:10px;overflow-wrap:anywhere">'+E(fb.why)+'</div>':'')
+      + '<div style="display:flex;flex-direction:column;gap:12px;margin-top:14px">'+fbRows(fb, multi)+'</div></div></div>'
+      + '<div style="flex-shrink:0;padding:12px 16px;border-top:1px solid var(--line);background:#fff">'
+      + '<button class="btn'+(fb.ok?'':' danger')+'" data-act="next" style="width:100%">'+(lastQ?'See results':(multi?'Next case':'Next artifact'))+'</button></div>';
+    return '<div style="flex:1;display:flex;flex-direction:column;min-height:0">'+body+'</div>'+(S.more?moreModal():'');
+  }
+
+  /* top bar: objective (tap for details), or "back to result" while peeking */
+  let topBar;
+  if (S.fb && S.peek){
+    topBar = '<div class="link" data-act="unpeek" style="flex-shrink:0;display:flex;align-items:center;gap:8px;padding:12px 14px;background:#fff;border-bottom:1px solid var(--line);color:var(--green);font-size:15px;font-weight:600">'+icon('arrowLeft','#0E7A4A',18)+'Back to result</div>';
+  } else {
+    const prog = multi ? ('  '+S.found.length+'/'+need) : (twoPhase ? ('  step '+S.phase+'/2') : '');
+    const kicker = (multi?'Prove':(expert?'Recall':'Locate'))+prog;
+    topBar = '<div class="link" data-act="sheet" style="flex-shrink:0;display:flex;align-items:center;gap:10px;padding:9px 14px;background:#fff;border-bottom:1px solid var(--line)">'
+      + '<div style="min-width:0;flex:1"><div class="mono" style="font-size:11px;color:var(--green)">'+E(kicker)+'</div>'
+      + '<div style="font-size:16px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+E(q.name)+'</div></div>'
+      + '<div style="flex-shrink:0;display:flex;align-items:center;gap:5px;color:var(--green);font-size:13px;font-weight:600">task '+icon('caretDown','#0E7A4A',13)+'</div></div>';
+  }
+
+  /* flash banner */
+  let flashBar = '';
+  if (S.flash && !S.fb){ const ok = S.flash.ok;
+    flashBar = '<div style="flex-shrink:0;padding:9px 14px;font-size:14px;background:'+(ok?'#E8F3EC':'#FBEAEC')+';color:'+(ok?'#155537':S.red)+'">'+E(S.flash.text)+'</div>';
+  }
+
+  const main = (S.fb && S.peek)
+    ? ((twoPhase && S.phase===2) ? mobileReg(q) : mobileExplorer(q))
+    : (expert ? mobileExpert(q) : ((twoPhase && S.phase===2) ? mobileReg(q) : mobileExplorer(q)));
+
+  const action = (S.fb && S.peek) ? '' : mobileAction(q, multi, expert, twoPhase, need);
+
+  return '<div style="flex:1;display:flex;flex-direction:column;min-height:0">'
+    + topBar + flashBar
+    + '<div style="flex:1;min-height:0;display:flex;flex-direction:column">'+main+'</div>'
+    + action
+    + '</div>'
+    + (S.sheet ? mobileSheet(q, multi, expert, twoPhase, need) : '')
+    + (S.more ? moreModal() : '');
+}
+
+/* mobile file explorer: no side tree, big rows, folder body opens, select button picks */
+function mobileExplorer(q){
+  const c = cfg();
+  const node = nodeAt(S.cwd) || tree();
+  const kids = sortKids(node);
+  const path = S.cwd.length ? c.rootShort+'  '+S.cwd.join('  ›  ') : c.rootLabel;
+  const upC = S.cwd.length ? '#444' : '#CACACA', backC = S.history.length ? '#444' : '#CACACA';
+  const bar = '<div style="flex-shrink:0;display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);background:#FAFAFA">'
+    + '<div class="link iconbtn" data-act="back" style="width:38px;height:38px;border-radius:6px;display:flex;align-items:center;justify-content:center">'+icon('arrowLeft',backC,18)+'</div>'
+    + '<div class="link iconbtn" data-act="up" style="width:38px;height:38px;border-radius:6px;display:flex;align-items:center;justify-content:center">'+icon('arrowUp',upC,18)+'</div>'
+    + '<div class="mono" style="flex:1;min-width:0;font-size:12px;color:#555;overflow-x:auto;white-space:nowrap;padding:0 4px">'+E(path)+'</div></div>';
+  let list = '';
+  kids.forEach(ch => {
+    const rel = segsToRel(S.cwd.concat([ch.name]));
+    const m = metaFor(ch, rel), ic = iconFor(ch), on = S.selected === rel;
+    if (ch.dir){
+      list += '<div style="display:flex;align-items:stretch;height:52px;border-bottom:1px solid #F2F2F2;background:'+(on?'#E3E7E9':'transparent')+'">'
+        + '<div class="link" data-act="nav" data-segs="'+A(rel)+'" style="flex:1;min-width:0;display:flex;align-items:center;gap:12px;padding:0 12px">'
+        + icon(ic.n,ic.c,22)+'<div style="min-width:0"><div style="font-size:15px;color:#1B1B1B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+E(ch.name)+'</div><div style="font-size:11px;color:#9AA0A6">'+E(m.kind)+'</div></div></div>'
+        + '<div class="link" data-act="sel" data-rel="'+A(rel)+'" title="select this folder" style="flex-shrink:0;width:54px;display:flex;align-items:center;justify-content:center;border-left:1px solid #F2F2F2">'+icon(on?'check':'dashed', on?'#0E7A4A':'#C4C9CD',22)+'</div></div>';
+    } else {
+      list += '<div class="link" data-act="sel" data-rel="'+A(rel)+'" style="display:flex;align-items:center;gap:12px;height:52px;padding:0 12px;border-bottom:1px solid #F2F2F2;background:'+(on?'#E3E7E9':'transparent')+'">'
+        + icon(ic.n,ic.c,22)+'<div style="flex:1;min-width:0"><div style="font-size:15px;color:#1B1B1B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+E(ch.name)+'</div><div style="font-size:11px;color:#9AA0A6">'+E(m.kind)+'</div></div>'
+        + (on?icon('check','#0E7A4A',20):'')+'</div>';
+    }
+  });
+  return bar + '<div style="flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch">'+list+'</div>';
+}
+
+/* mobile registry editor: same pattern, keys open on body tap, select button picks */
+function mobileReg(q){
+  const root = REG[q.id].root;
+  const node = regNodeAt(root, S.rCwd) || regTree(root);
+  const kids = sortKids(node);
+  const path = 'Computer  ›  '+root+(S.rCwd.length?'  ›  '+S.rCwd.join('  ›  '):'');
+  const upC = S.rCwd.length ? '#444' : '#CACACA', backC = S.rHistory.length ? '#444' : '#CACACA';
+  const bar = '<div style="flex-shrink:0;display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);background:#FAFAFA">'
+    + '<div class="link iconbtn" data-act="rback" style="width:38px;height:38px;border-radius:6px;display:flex;align-items:center;justify-content:center">'+icon('arrowLeft',backC,18)+'</div>'
+    + '<div class="link iconbtn" data-act="rup" style="width:38px;height:38px;border-radius:6px;display:flex;align-items:center;justify-content:center">'+icon('arrowUp',upC,18)+'</div>'
+    + '<div class="mono" style="flex:1;min-width:0;font-size:12px;color:#555;overflow-x:auto;white-space:nowrap;padding:0 4px">'+E(path)+'</div></div>';
+  let list = '';
+  kids.forEach(ch => {
+    const rel = S.rCwd.concat([ch.name]).join('/'), on = S.rSelected === rel;
+    list += '<div style="display:flex;align-items:stretch;height:52px;border-bottom:1px solid #F2F2F2;background:'+(on?'#E3E7E9':'transparent')+'">'
+      + '<div class="link" data-act="rnav" data-segs="'+A(rel)+'" style="flex:1;min-width:0;display:flex;align-items:center;gap:12px;padding:0 12px">'
+      + icon('folder','#B79A5B',22)+'<div style="min-width:0"><div style="font-size:15px;color:#1B1B1B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+E(ch.name)+'</div><div style="font-size:11px;color:#9AA0A6">Key</div></div></div>'
+      + '<div class="link" data-act="rsel" data-rel="'+A(rel)+'" title="select this key" style="flex-shrink:0;width:54px;display:flex;align-items:center;justify-content:center;border-left:1px solid #F2F2F2">'+icon(on?'check':'dashed', on?'#0E7A4A':'#C4C9CD',22)+'</div></div>';
+  });
+  if (!kids.length) list = '<div style="padding:16px;font-size:14px;color:#999">This key has no subkeys — its values live here. Select it with the button on its row in the parent, then confirm.</div>';
+  return bar + '<div style="flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch">'+list+'</div>';
+}
+
+/* mobile expert: no explorer, just the path input */
+function mobileExpert(q){
+  const c = cfg();
+  return '<div style="flex:1;min-height:0;overflow-y:auto;padding:20px">'
+    + '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:14px 0 20px;color:#8A9095">'+icon('lock','#8A9095',24)+'<div class="mono" style="font-size:13px">'+E(c.shell.toLowerCase())+' locked · type from memory</div></div>'
+    + '<div class="mono" style="font-size:12px;color:#A6A6A6">type the full path</div>'
+    + '<input id="typed" type="text" value="'+A(S.typed)+'" placeholder="'+A(c.placeholder)+'" spellcheck="false" autocomplete="off" autocapitalize="off" '
+    + 'style="width:100%;margin-top:6px;height:46px;border:1px solid #CACACA;border-radius:8px;padding:0 14px;font-family:var(--mono);font-size:15px;color:var(--ink);background:#fff;outline:none">'
+    + '<div class="mono" style="font-size:12px;color:#A6A6A6;margin-top:8px;line-height:18px">'+E(c.note)+'</div></div>';
+}
+
+/* mobile bottom action bar: selection + primary confirm */
+function mobileAction(q, multi, expert, twoPhase, need){
+  const selRel = (twoPhase && S.phase===2) ? S.rSelected : S.selected;
+  let disp = null;
+  if (expert) disp = S.typed.trim() ? S.typed.trim() : null;
+  else if (selRel) disp = (twoPhase && S.phase===2) ? regDisplay(q.id, selRel) : relToDisplay(selRel);
+  const label = twoPhase ? (S.phase===1?'Open hive':'Confirm key') : (expert ? (multi?'Log path':'Submit') : (multi?'Log evidence':'Confirm'));
+  const ready = !!disp;
+  return '<div style="flex-shrink:0;background:#fff;border-top:1px solid var(--line);padding:10px 14px;display:flex;align-items:center;gap:12px">'
+    + '<div style="flex:1;min-width:0"><div class="mono" style="font-size:11px;color:#A6A6A6">'+(expert?'typed path':'selected')+'</div>'
+    + '<div class="mono" style="font-size:13px;color:'+(ready?'var(--green)':'#B8B8B8')+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+E(disp || (expert?'type a path above':'tap a file or a folder’s ✓'))+'</div></div>'
+    + '<button class="btn" data-act="confirm"'+((expert||ready)?'':' aria-disabled="true"')+' style="flex-shrink:0">'+label+'</button></div>';
+}
+
+/* mobile task sheet: objective, progress, evidence, hint, give up */
+function mobileSheet(q, multi, expert, twoPhase, need){
+  const progress = S.queue.length ? Math.round(S.idx / S.queue.length * 100) : 0;
+  let slots = '';
+  if (multi){
+    S.found.forEach(id => { const a = art(id);
+      slots += '<div style="display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border-radius:5px;background:var(--panel);border:1px solid #DDE1E4;margin-top:8px">'
+        + icon('check','#0E7A4A',16)+'<div style="min-width:0"><div style="font-size:15px;font-weight:600;color:#444">'+E(a.name)+'</div>'
+        + '<div class="mono" style="font-size:11px;color:#777;word-break:break-all">'+E(relToDisplay(a.rel))+'</div></div></div>';
+    });
+    for (let i=S.found.length;i<need;i++){
+      slots += '<div style="display:flex;gap:10px;align-items:center;padding:9px 12px;border-radius:5px;background:#fff;border:1px dashed #D9D9D9;margin-top:8px">'
+        + icon('dashed','#CACACA',16)+'<div style="font-size:15px;font-weight:600;color:#B8B8B8">Evidence '+(i+1)+'</div></div>';
+    }
+  }
+  let hintBlock = '';
+  if (!multi && !expert && !twoPhase){
+    if (S.hintShown){ const base=q.rel.split('/')[0], leaf=q.rel.split('/').pop();
+      hintBlock = '<div style="background:var(--panel);border-left:3px solid var(--green);border-radius:0 6px 6px 0;padding:11px 14px;font-size:15px;line-height:21px;color:#555;margin-top:14px">'+E(HINTS[q.id]||('Look for "'+leaf+'" under '+base+'.'))+'</div>';
+    } else {
+      hintBlock = '<button class="btn out" data-act="hint" style="margin-top:14px">Show hint</button>';
+    }
+  }
+  return '<div data-act="sheetClose" style="position:fixed;inset:0;z-index:55;background:rgba(20,24,28,.5);display:flex;align-items:flex-end">'
+    + '<div data-act="stop" style="width:100%;max-height:82vh;overflow-y:auto;background:#fff;border-radius:16px 16px 0 0;padding:8px 18px 22px">'
+    + '<div style="display:flex;justify-content:center;padding:6px 0 12px"><div style="width:40px;height:4px;border-radius:2px;background:#DADDE0"></div></div>'
+    + '<div style="display:flex;align-items:baseline;justify-content:space-between"><div class="mono" style="font-size:12px;color:var(--grey)">'+(multi?'Case ':'Artifact ')+(S.idx+1)+' of '+S.queue.length+'</div><div class="mono" style="font-size:13px;color:#555">'+S.score+' pts</div></div>'
+    + '<div style="height:4px;background:var(--line);border-radius:2px;margin-top:8px;overflow:hidden"><div style="height:4px;background:var(--green);width:'+progress+'%"></div></div>'
+    + '<div class="mono" style="font-size:12px;color:var(--green);margin-top:16px">'+(multi?'Prove':(expert?'Recall':'Locate'))+(twoPhase?' · registry search':'')+'</div>'
+    + '<div style="font-size:24px;line-height:30px;font-weight:600;color:var(--ink);margin-top:3px">'+E(q.name)+'</div>'
+    + '<div style="font-size:16px;line-height:23px;color:var(--muted);margin-top:6px">'+E(q.sub)+'</div>'
+    + (twoPhase?'<div style="font-size:14px;color:#666;margin-top:10px">Step '+S.phase+' of 2 — '+(S.phase===1?'find and open the hive file in the explorer.':'navigate the opened hive to the key.')+'</div>':'')
+    + (multi?'<div class="mono" style="font-size:12px;color:var(--grey);margin-top:16px">logged evidence · '+S.found.length+'/'+need+'</div>'+slots:'')
+    + hintBlock
+    + '<div style="display:flex;gap:14px;align-items:center;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">'
+    + '<button class="btn" data-act="sheetClose" style="flex:1">Back to explorer</button>'
+    + '<span class="link" data-act="skip" style="font-size:15px;color:#A6A6A6;text-decoration:underline">Give up</span></div>'
     + '</div></div>';
 }
 
@@ -1390,6 +1571,9 @@ function render(){
   /* header only changes between screens — leave it alone on in-screen clicks */
   if (screenChanged) document.getElementById('pf-hdr').innerHTML = header();
 
+  /* on a phone, the game is full-bleed — hide the footer chrome there */
+  document.getElementById('pf-ftr').style.display = (isMobile() && S.screen==='game') ? 'none' : '';
+
   const scr = document.getElementById('pf-screen');
   scr.innerHTML = body;
   /* play the fade-in only when the screen actually changes, never on every click */
@@ -1432,7 +1616,7 @@ document.getElementById('app').addEventListener('click', e => {
       const pool = regActive() ? regPool() : (isMulti()?SCEN():catArt());
       if (pool.length === 0) break;
       setState({screen:'game', queue: buildQueue(), idx:0, score:0, log:[], cwd:[], selected:null, typed:'', hintShown:false, fb:null, history:[], found:[], wrong:0, flash:null,
-        phase:1, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, more:null});
+        phase:1, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, more:null, sheet:false, peek:false});
       break;
     }
     case 'quit': setState({screen:'done', fb:null}); break;
@@ -1473,16 +1657,19 @@ document.getElementById('app').addEventListener('click', e => {
     }
     case 'reveal': {
       const rel = el.getAttribute('data-rel'), prefix = el.getAttribute('data-prefix')==='1';
-      setState(Object.assign({phase:1, more:null}, expandTo(rel, prefix)));
+      setState(Object.assign({phase:1, more:null, peek:true}, expandTo(rel, prefix)));
       break;
     }
     case 'rreveal': {
       const key = el.getAttribute('data-key');
-      setState(Object.assign({phase:2, more:null}, regExpandTo(key)));
+      setState(Object.assign({phase:2, more:null, peek:true}, regExpandTo(key)));
       break;
     }
     case 'more': setState({more: el.getAttribute('data-id')}); break;
     case 'moreClose': setState({more:null}); break;
+    case 'sheet': setState({sheet:true}); break;
+    case 'sheetClose': setState({sheet:false}); break;
+    case 'unpeek': setState({peek:false}); break;
     case 'stop': break;
     case 'sel': {
       const rel = el.getAttribute('data-rel');
@@ -1503,14 +1690,15 @@ document.getElementById('app').addEventListener('click', e => {
     case 'confirm': if (!(el.getAttribute('aria-disabled')==='true')) confirm(); break;
     case 'hint': setState({hintShown:true}); break;
     case 'skip':
+      S.sheet = false;
       if (regActive() && regCapable(cur().id)) gradeRegDone(false);
       else if (isMulti()) closeScenario(false, S.found);
       else gradeSingle(false);
       break;
     case 'next': {
-      if (S.idx >= S.queue.length-1) setState({screen:'done', fb:null});
+      if (S.idx >= S.queue.length-1) setState({screen:'done', fb:null, sheet:false, peek:false});
       else setState({idx:S.idx+1, fb:null, selected:null, typed:'', hintShown:false, found:[], wrong:0, flash:null,
-        phase:1, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, more:null});
+        phase:1, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, more:null, sheet:false, peek:false});
       break;
     }
   }
