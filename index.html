@@ -124,13 +124,13 @@ const WIN_ART = [
    why:'Records full path, SHA-1, PE metadata and first-run timestamps for executables. It survives deletion of the binary, which makes it the go-to when the file itself is gone.',tool:'AmcacheParser'},
   {id:'recentfilecache',cat:'exec',name:'RecentFileCache',sub:'The pre-AmCache appcompat artifact (Win7).',rel:'Windows/appcompat/Programs/RecentFileCache.bcf',since:0,until:0,
    why:'Windows 7 before the AmCache era logs only newly executed binaries here, as a flat list of paths with no hashes and no per-file timestamps. AmCache replaces it from Windows 8 onward.',tool:'RecentFileCacheParser'},
-  {id:'pca',cat:'exec',name:'PCA app launch log',sub:'Plain-text launch list, new in Windows 11.',rel:'Windows/appcompat/pca/PcaAppLaunchDic.txt',since:2,
+  {id:'pca',cat:'exec',name:'PCA app launch log',sub:'Plain-text launch list, new in Windows 11.',rel:'Windows/appcompat/pca/PcaAppLaunchDic.txt',since:2,folderOk:true,
    why:'The Program Compatibility Assistant writes executable path and last execution time as text, one entry per line. Only present from Windows 11 onward and often overlooked.',tool:'any text editor'},
-  {id:'srum',cat:'exec',name:'SRUM',sub:'Resource usage: bytes moved, per process, per user.',rel:'Windows/System32/sru/SRUDB.dat',since:1,
+  {id:'srum',cat:'exec',name:'SRUM',sub:'Resource usage: bytes moved, per process, per user.',rel:'Windows/System32/sru/SRUDB.dat',since:1,folderOk:true,
    why:'System Resource Usage Monitor keeps roughly 30 days of hourly rollups per application and user SID, including network bytes sent and received. Strong for proving execution plus data volume.',tool:'SrumECmd'},
-  {id:'shimcache',cat:'exec',name:'ShimCache & BAM',sub:'Both live in the SYSTEM hive on disk.',rel:'Windows/System32/config/SYSTEM',since:0,
+  {id:'shimcache',cat:'exec',name:'ShimCache & BAM',sub:'Presence and last-execution evidence in the registry.',rel:'Windows/System32/config/SYSTEM',since:0,
    why:'ShimCache under ControlSet\\Control\\Session Manager\\AppCompatCache proves presence, not execution. BAM under Services\\bam\\State\\UserSettings gives a last-execution time per user SID.',tool:'AppCompatCacheParser, RECmd'},
-  {id:'userassist',cat:'exec',name:'UserAssist',sub:'GUI launch counts, stored in the user hive.',rel:'Users/j.doe/NTUSER.DAT',since:0,
+  {id:'userassist',cat:'exec',name:'UserAssist',sub:'GUI launch counts, tracked per user.',rel:'Users/j.doe/NTUSER.DAT',since:0,
    why:'Under Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\UserAssist, program names ROT13-encoded, plus run count and last execution. Covers only programs launched through the shell.',tool:'RegRipper, RECmd'},
   {id:'sec4688',cat:'exec',name:'Process creation events',sub:'Event ID 4688, when auditing is on.',rel:'Windows/System32/winevt/Logs/Security.evtx',since:0,
    why:'4688 records the new process, its parent and the invoking user; the command line is included only if the audit policy was enabled. 4689 marks process exit.',tool:'EvtxECmd'},
@@ -138,19 +138,19 @@ const WIN_ART = [
    why:'Event ID 1 carries full command line, parent process, working directory, user and hashes. Richer than 4688, but only exists where Sysmon was deployed before the incident.',tool:'EvtxECmd, Chainsaw'},
   {id:'muicache',cat:'exec',name:'MUICache',sub:'Friendly-name cache for executables run in the GUI.',rel:'Users/j.doe/AppData/Local/Microsoft/Windows/UsrClass.dat',since:0,
    why:'Under Software\\Classes\\Local Settings\\...\\MuiCache in UsrClass.dat, one value per executable path with its FileDescription. Proves the binary was present and shell-launched, but carries no timestamps.',tool:'RegRipper, RECmd'},
-  {id:'timeline',cat:'exec',name:'Windows Timeline',sub:'Activity DB behind the old Task View history.',rel:'Users/j.doe/AppData/Local/ConnectedDevicesPlatform/L.j.doe/ActivitiesCache.db',since:1,
+  {id:'timeline',cat:'exec',name:'Windows Timeline',sub:'Activity DB behind the old Task View history.',rel:'Users/j.doe/AppData/Local/ConnectedDevicesPlatform/L.j.doe/ActivitiesCache.db',since:1,folderOk:true,
    why:'SQLite rows per activity with start and end time, the application ID and, for some entries, the arguments. The UI was dropped in Windows 11 but the database is frequently still populated.',tool:'WxTCmd'},
   {id:'jumplists',cat:'exec',name:'Jump Lists',sub:'Per-application usage lists in the user profile.',rel:'Users/j.doe/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations',prefix:true,since:0,
    why:'One .automaticDestinations-ms per application. The AppID identifies the program, the DestList stream records how often and when it was used and which files it opened.',tool:'JLECmd'},
 
   /* -- persistence -- */
-  {id:'run_user',cat:'persist',name:'Run / RunOnce (user)',sub:'Autostart values in the user hive.',rel:'Users/j.doe/NTUSER.DAT',since:0,
+  {id:'run_user',cat:'persist',name:'Run / RunOnce (user)',sub:'Per-user autostart entries in the registry.',rel:'Users/j.doe/NTUSER.DAT',since:0,
    why:'Software\\Microsoft\\Windows\\CurrentVersion\\Run and RunOnce launch a command at every logon for this user. No admin rights required, which makes it the cheapest persistence on Windows.',tool:'RegRipper, RECmd'},
-  {id:'run_sys',cat:'persist',name:'Run keys (machine)',sub:'System-wide autostart in the SOFTWARE hive.',rel:'Windows/System32/config/SOFTWARE',since:0,
+  {id:'run_sys',cat:'persist',name:'Run keys (machine)',sub:'System-wide autostart entries in the registry.',rel:'Windows/System32/config/SOFTWARE',since:0,
    why:'Microsoft\\Windows\\CurrentVersion\\Run and the Winlogon Shell/Userinit values run for every user at boot or logon. Needs admin to write, so it signals privileged access.',tool:'RegRipper, RECmd'},
   {id:'tasks',cat:'persist',name:'Scheduled Tasks',sub:'On-disk task definitions as XML.',rel:'Windows/System32/Tasks',prefix:true,since:0,
    why:'One XML file per task with the trigger, the action (the command to run) and the author. Pairs with Microsoft-Windows-TaskScheduler%4Operational events for registration and run times.',tool:'any text editor, TaskScheduler'},
-  {id:'services',cat:'persist',name:'Services',sub:'Service definitions in the SYSTEM hive.',rel:'Windows/System32/config/SYSTEM',since:0,
+  {id:'services',cat:'persist',name:'Services',sub:'Installed service definitions in the registry.',rel:'Windows/System32/config/SYSTEM',since:0,
    why:'Under ControlSet\\Services each subkey holds ImagePath, Start type and the account. Start=2 is auto-start persistence; a service pointing at a user-writable path or a lone DLL is a red flag.',tool:'RegRipper, RECmd'},
   {id:'startup',cat:'persist',name:'Startup folder',sub:'Shortcuts launched at logon.',rel:'Users/j.doe/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup',prefix:true,since:0,
    why:'Anything dropped here — usually a .lnk — is launched when the user logs on. The oldest and most visible persistence spot, but still routinely abused.',tool:'LECmd, any text editor'},
@@ -178,7 +178,7 @@ const WIN_ART = [
    why:'The urls and visits tables hold every page and visit time; the downloads table records the target path, source URL, referrer, bytes and start/end time. First stop for web-delivered payloads.',tool:'sqlite3, DB Browser'},
   {id:'edge_hist',cat:'web',name:'Edge history',sub:'Chromium Edge browsing / downloads.',rel:'Users/j.doe/AppData/Local/Microsoft/Edge/User Data/Default/History',since:0,
    why:'Same Chromium schema as Chrome — urls, visits, downloads. Worth checking on managed hosts where Edge is the default and Chrome data is absent.',tool:'sqlite3, DB Browser'},
-  {id:'webcache',cat:'web',name:'WebCacheV01.dat',sub:'IE/legacy-Edge history in an ESE database.',rel:'Users/j.doe/AppData/Local/Microsoft/Windows/WebCache/WebCacheV01.dat',since:0,
+  {id:'webcache',cat:'web',name:'WebCacheV01.dat',sub:'IE/legacy-Edge history in an ESE database.',rel:'Users/j.doe/AppData/Local/Microsoft/Windows/WebCache/WebCacheV01.dat',since:0,folderOk:true,
    why:'An ESE database holding legacy Internet Explorer / Spartan Edge history, cache and cookie containers. Still populated by WinINet, so downloads through non-browser tooling can land here.',tool:'ESEDatabaseView'},
   {id:'zone',cat:'web',name:'Zone.Identifier (MOTW)',sub:'Mark-of-the-Web on downloaded files.',rel:'Users/j.doe/Downloads',prefix:true,since:0,
    why:'Files fetched from the internet carry a Zone.Identifier alternate data stream with ZoneId=3 and, for browser downloads, the HostUrl and ReferrerUrl. Proves origin and survives on the file itself.',tool:'dir /r, Get-Content -Stream'},
@@ -723,11 +723,14 @@ function iconFor(node){
 function relToDisplay(rel){ return S.os === 'mac' ? '/'+rel : 'C:\\'+rel.replace(/\//g,'\\'); }
 function segsToRel(segs){ return segs.join('/'); }
 function canon(rel){ return rel.toLowerCase().replace(/^users\/[^/]+/, 'users/*'); }
+function parentRel(rel){ const i = rel.lastIndexOf('/'); return i < 0 ? '' : rel.slice(0, i); }
 
 function matches(a, selRel){
   if (!a) return false;
   const w = a.rel, g = selRel;
-  return a.prefix ? (g === w || g.indexOf(w + '/') === 0) : g === w;
+  if (a.prefix) return g === w || g.indexOf(w + '/') === 0;
+  /* folderOk artifacts also accept the folder that holds the file */
+  return g === w || (a.folderOk && g === parentRel(w));
 }
 function normTyped(input){
   let s = String(input||'').trim().toLowerCase().replace(/"/g,'');
@@ -745,7 +748,8 @@ function normTyped(input){
 }
 function typedMatches(a, typed){
   const want = canon(a.rel), got = normTyped(typed);
-  return a.prefix ? (got === want || got.indexOf(want + '/') === 0) : got === want;
+  if (a.prefix) return got === want || got.indexOf(want + '/') === 0;
+  return got === want || (a.folderOk && got === canon(parentRel(a.rel)));
 }
 
 /* ------------------------------- navigation ------------------------------- */
