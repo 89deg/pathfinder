@@ -39,6 +39,8 @@
   .crumb:hover{background:#EFEFEF}
   .iconbtn:hover{background:#EFEFEF}
   .link{cursor:pointer}
+  .revpath{cursor:pointer}
+  .revpath:hover{text-decoration:underline}
   .fade{animation:fade .18s ease}
   @keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
   /* start-screen two-column layout: controls left, permanent guide right */
@@ -435,7 +437,170 @@ const S = {
   cwd:[], history:[], expanded:{}, selected:null, typed:'',
   hintShown:false, fb:null, log:[], found:[], wrong:0, flash:null,
   backTo:'start', vw: window.innerWidth,
+  regOn:false, phase:1,                       /* registry-search add-on (Level 1, Windows) */
+  rCwd:[], rHistory:[], rExpanded:{}, rSelected:null,
+  more:null,                                  /* artifact id whose "tell me more" dialog is open */
 };
+
+const MORE = {
+  "prefetch": ["One .pf per executable (name+path hash). Decodes to the last 8 run times, a run counter, and the files/DLLs the binary loaded in its first ~10 seconds of each run.", "Proves execution and gives a mini-timeline of what the process touched — great for spotting a tool that read unusual files.", "Client Windows only (off on Server), needs the SysMain service, and is capped (1024 files on Win8+, 128 on Win7) so busy hosts age entries out."],
+  "amcache": ["Registry hive under appcompat. Root\\InventoryApplicationFile holds full path, SHA-1, size, PE compile time and a first-seen time per binary.", "Survives deletion of the file — the SHA-1 lets you match a wiped binary against threat intel.", "First-seen is registration, not execution. Treat it as 'was present' and corroborate a run with Prefetch or BAM."],
+  "recentfilecache": ["Windows 7-only flat list of newly executed binaries — paths only, no hashes and no per-file timestamps.", "Replaced by AmCache from Windows 8 onward; if you are parsing it, you are on legacy."],
+  "pca": ["Windows 11 plain text: PcaAppLaunchDic.txt maps executable path to last run time, one per line; PcaGeneralDb0.txt logs abnormal exits.", "Human-readable proof of execution with a timestamp, trivially parsed and very often overlooked.", "Only apps the Program Compatibility Assistant observed — not an exhaustive execution list."],
+  "srum": ["ESE database with hourly rollups (~30-60 days) per application and user SID: bytes sent and received, CPU time, and the network interface used.", "One of the few artifacts that ties execution to data volume — strong for sizing exfiltration.", "Data is buffered in the registry and flushed periodically; the most recent hour may be missing until a clean shutdown."],
+  "shimcache": ["AppCompatCache in the SYSTEM hive: file path, the file's $Standard_Information modified time, and a flag. On Windows 10 entries are added on metadata change, NOT reliably on execution.", "Proves presence (and rough ordering on older Windows), not execution. BAM/DAM under Services\\bam gives a real last-execution time per user SID.", "Only written to disk at shutdown — a live-triage capture will miss the most recent entries."],
+  "userassist": ["NTUSER Explorer\\UserAssist: program names ROT13-encoded, with run count, last-run time and total focus time.", "GUI/shell launches only (never command-line), so it proves a user interactively ran something.", "Per-user and easily reset — gaps can mean the key was cleared."],
+  "sec4688": ["Security event 4688 = process creation: new PID, image path, parent process, and the invoking user; 4689 marks exit.", "The full command line is included ONLY if the 'Include command line in process creation events' audit policy was enabled — off by default.", "Parent-child linkage exposes living-off-the-land chains (e.g. winword.exe spawning powershell.exe)."],
+  "sysmon": ["Sysmon event ID 1 always records the full command line, parent process, image, working directory, integrity level and file hashes.", "Far richer than 4688 — but only exists if Sysmon was deployed before the incident, and its config decides what was captured.", "Correlate with EID 3 (network) and 11 (file create) to reconstruct the full activity."],
+  "muicache": ["UsrClass Shell\\MuiCache: one value per executable path with its FileDescription, cached when the shell displays it.", "Proves presence and preserves a friendly name, but carries no timestamps.", "Handy for recovering the original name of a binary that was later renamed or deleted."],
+  "timeline": ["ActivitiesCache.db (SQLite): per-activity start/end time, application id, and for some rows the file or URL and even clipboard payload.", "Reconstructs what a user did and when across applications; the Task View UI was dropped in Windows 11 but the database is often still written.", "Per-user, with limited retention (~30 days)."],
+  "jumplists": ["AutomaticDestinations *.automaticDestinations-ms: the AppID identifies the application; the embedded DestList records access count, first/last used and the target file paths.", "Proves a specific app opened specific files — including files on network shares or removable drives that are no longer attached.", "CustomDestinations is a different beast (pinned/task items), not usage history."],
+  "run_user": ["HKCU Software\\Microsoft\\Windows\\CurrentVersion\\Run (+ RunOnce) launches a command at this user's logon; RunOnce deletes itself after firing.", "The cheapest persistence on Windows — no admin rights needed for the user hive.", "Inspect the value data for LOLBins (rundll32, mshta) and payloads in Temp/AppData."],
+  "run_sys": ["HKLM SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run runs for every user at boot/logon; needs admin to write, so it signals privileged access.", "Winlogon Shell and Userinit values in the same hive are related, higher-impact persistence spots.", "Suspicious data: unsigned binaries or scripts launched from user-writable paths."],
+  "tasks": ["System32\\Tasks holds one XML per task (trigger, action/command, author, run context); the SOFTWARE hive mirrors them under Schedule\\TaskCache.", "Both persistence and execution proof — pair with the TaskScheduler Operational log (106 registered, 200/201 run).", "A task present on disk but missing its TaskCache entry is a known hiding technique."],
+  "services": ["SYSTEM Services\\<name>: ImagePath, Start type (2 = auto) and the account it runs as; a new service install also logs as System event 7045.", "Classic lateral-movement / PsExec trace and persistence, typically running as SYSTEM.", "Red flags: a service pointing at a lone DLL via svchost -k, or an ImagePath in a user-writable folder."],
+  "startup": ["The per-user Startup folder: anything dropped here (usually a .lnk) runs at that user's logon.", "The oldest and most visible autostart location — still routinely abused; always resolve the LNK target.", "A machine-wide equivalent lives under ProgramData."],
+  "wmi": ["Fileless persistence: an __EventFilter bound to a CommandLineEventConsumer fires code on a system trigger, stored entirely in the CIM repository (OBJECTS.DATA).", "Nothing sits on the file system, and it survives reboot — a favourite of advanced actors.", "Hunt it by parsing OBJECTS.DATA or querying root\\subscription for unusual consumers."],
+  "shellbags": ["UsrClass BagMRU/Bags store per-folder Explorer view settings, written the first time a folder is opened in the GUI.", "Proves a folder was browsed — including removable, network, deleted folders and even ZIP contents — with timestamps.", "Absence is not proof of non-access; it only records Explorer GUI browsing."],
+  "lnk_recent": ["Recent\\*.lnk are auto-created when a file is opened. Each embeds the target path, the volume serial and label, size, and three MAC timestamps of the target as it was at open time.", "Outlives the original file and even the volume, tying a user to a specific file on a specific device.", "Match the embedded volume serial to USBSTOR to place a file on a particular USB stick."],
+  "recentdocs": ["NTUSER Explorer\\RecentDocs: an MRU of opened file names grouped into per-extension subkeys, plus a folder-level MRU; the key's last-write time = last opened.", "Proves a file name was opened by the user, but stores no full path.", "A wiped RecentDocs (or a 'clear recent' action) can itself be an anti-forensics signal."],
+  "thumbcache": ["thumbcache_*.db caches image and document previews by size; the cached picture can survive deletion of the original file.", "Proves a file with visual content existed and that its folder was viewed in a thumbnail mode.", "Cache IDs map back to files via the Windows Search index (Windows.edb)."],
+  "recyclebin": ["$Recycle.Bin\\<SID>\\: the $I file records the original path, size and deletion time; the $R file is the recycled content itself.", "Direct, recoverable proof of an intentional delete by a specific user.", "SHIFT+Delete and emptying bypass or remove these — so absence is not proof nothing was deleted."],
+  "mft": ["$MFT: one ~1 KB record per file/dir carrying two timestamp sets ($STANDARD_INFORMATION and $FILE_NAME); small files store their data resident and are directly recoverable.", "Comparing $SI vs $FN timestamps exposes timestomping; deleted records persist until the slot is reused.", "It is the backbone of any NTFS timeline (MFTECmd -> bodyfile/timeline)."],
+  "usnjrnl": ["$Extend\\$UsnJrnl:$J logs every create, rename, write, delete and security change with a reason code, timestamp and parent reference.", "Reconstructs file activity long after the files — and even their $MFT records — are gone.", "It is a rolling buffer, so old entries age out; carve unallocated/slack for more history."],
+  "chrome_hist": ["SQLite History: the urls/visits tables hold every page and visit time with a transition type; the downloads table holds source URL, referrer, target path, byte count and start/end time.", "Proves browsing and web-delivered payloads; transitions distinguish typed vs link vs redirect.", "Cookies, Login Data and Sessions files nearby add authentication and live-session context."],
+  "edge_hist": ["Chromium Edge uses the exact same schema as Chrome (urls, visits, downloads) under a different path.", "Worth checking on managed hosts where Edge is the default and no Chrome profile exists.", "Legacy (Spartan) Edge history instead lives in the ESE WebCache database."],
+  "webcache": ["WebCacheV01.dat is an ESE database holding legacy Internet Explorer / Spartan Edge history, cache and cookie containers.", "Still fed by WinINet, so downloaders and tools that use that API can leave traces here even when Chrome/Edge are primary.", "Parse with ESEDatabaseView or a dedicated WebCache parser."],
+  "zone": ["The Zone.Identifier alternate data stream on a downloaded file carries ZoneId=3 (Internet) and, for browser downloads, the HostUrl and ReferrerUrl.", "Proves internet origin and rides on the file itself — SmartScreen and Office macro-blocking key off it (Mark-of-the-Web).", "Copying to FAT/exFAT, or extracting with some tools, strips the stream."],
+  "usbstor": ["SYSTEM Enum\\USBSTOR: vendor/product/revision then a per-serial subkey; the device Properties hold first-connect, last-connect and last-removal times.", "The anchor of USB analysis — the serial number ties a device across every other artifact.", "Correlate with setupapi (first ever plug-in), MountedDevices (drive letter) and LNK volume serials."],
+  "mounteddev": ["SYSTEM\\MountedDevices maps \\DosDevices\\X: and \\??\\Volume{GUID} entries to a device signature or USB id.", "Bridges a USBSTOR serial to the drive letter it mounted as — needed to attribute file paths to a device.", "Drive letters get reused, so correlate by timestamp."],
+  "setupapi": ["Windows\\INF\\setupapi.dev.log is plain text recording the first-ever driver install per device — i.e. the first time it was ever plugged into this machine.", "Gives the very first connection time that USBSTOR alone does not.", "Timestamps are local time — mind DST when building a timeline."],
+  "logon_evt": ["Security 4624 (success) and 4625 (failure): account, Logon Type (2 interactive, 3 network, 10 RDP, 5 service, 7 unlock), source host/IP and a Logon ID that links the session.", "The backbone of who logged on, when and from where; the type separates hands-on-keyboard from share access.", "4634/4647 close sessions, and 4672 flags logons granted admin privileges."],
+  "sam": ["The SAM hive Domains\\Account\\Users holds, per RID, the last logon, password-set/last-change times, login count and group membership.", "Exposes rogue local accounts and RID-500 renames (the built-in Administrator hiding under a new name).", "Local accounts only — domain accounts live in NTDS.dit on the domain controller."],
+  "rdp_evt": ["TerminalServices-LocalSessionManager events 21/25 (logon/reconnect, with source IP and user) and 24 (disconnect); RemoteConnectionManager 1149 marks a network-level connection attempt.", "The cleanest view of inbound RDP and where it came from.", "Pair with Security 4624 type 10 (and the RDP bitmap cache) to reconstruct the session."],
+  "system_evt": ["The System log: 7045 (new service installed — a PsExec/lateral-movement tell), 7034/7036 (service state), 7040 (start-type change), 1074 (shutdown/reboot) and 104 (a log was cleared).", "General system-side timeline plus a tamper signal when 104 shows up.", "The 7045 ImagePath is a top triage field."],
+  "unified": [".tracev3 files in /var/db/diagnostics (strings live in /var/db/uuidtext): process launches, code-signing and notarization, XProtect/Gatekeeper verdicts, network and much more.", "The single richest macOS source — but retention is only days and it is memory-buffered, so collect it first (log collect / sysdiagnose).", "Use predicate filters with `log show` (process, subsystem, eventMessage) to cut the noise."],
+  "knowledgec": ["knowledgeC.db records app-in-focus and usage streams: bundle id, device, and precise start/end intervals.", "Proves an application was actually used in the foreground, not merely present; APOLLO parses its many streams.", "It also holds device lock/unlock, Now-Playing and other behavioural signal."],
+  "execpolicy": ["The ExecPolicy database stores the hash, cdhash, signing/notarization identity and timestamp of binaries evaluated on first launch, including a user's 'Open anyway' approval.", "Rows survive deletion of the application — proof a specific binary was first-run and approved.", "Catalina and later; pair it with Gatekeeper events in the Unified Log."],
+  "spotlight": [".Spotlight-V100/Store-V2 holds kMDItem metadata per indexed file, including kMDItemWhereFroms (the download URL) and content-creation/last-used dates.", "Often retains a file's origin and dates even after the file has been deleted.", "Read live with `mdls`; parse the store directly on a dead disk."],
+  "launchagents_u": ["plist jobs in ~/Library/LaunchAgents run at this user's login; ProgramArguments is what actually executes.", "No admin rights needed, which makes it the cheapest macOS persistence.", "RunAtLoad/KeepAlive plus a payload in /tmp or ~/Library is the classic tell."],
+  "launchdaemons": ["plist jobs in /Library/LaunchDaemons run as root at boot, before any user logs in.", "/System/Library is Apple-owned and SIP-protected, so third-party persistence lives under /Library.", "Check ProgramArguments and the signing status of the referenced binary."],
+  "launchagents_sys": ["plist jobs in /Library/LaunchAgents run at login for any user, as that user — installed with admin, they persist across every account.", "Distinct from the per-user ~/Library and the root /Library/LaunchDaemons domains.", "Compare against BTM to spot orphaned or hidden jobs."],
+  "btm": ["The Ventura+ Background Task Management store is a durable record of every login item and launchd job, including the developer id.", "A second, harder-to-hide view of persistence — the same data that 'Login Items & Extensions' shows; dump it with `sfltool dumpbtm`.", "Diff it against the launchd plists to find inconsistencies."],
+  "fsevents": ["/.fseventsd is a per-volume log of create/rename/modify/delete by path, ordered by event id with only coarse time.", "Shows a file or directory existed and was touched even after deletion — great for staging and exfil folders.", "Events lack precise timestamps and can be coalesced, so corroborate timing elsewhere."],
+  "recentitems": ["com.apple.recentitems and the SharedFileList *.sfl2 files record recently opened documents, apps and servers as bookmark data (paths, volume, sometimes network mounts).", "Ties a user to specific files and servers; bookmarks can resolve even files that were moved.", "Per-application 'recents' (sfl2) widen the coverage."],
+  "quarantine": ["QuarantineEventsV2 is a SQLite database with one row per downloaded item: timestamp, origin URL, referrer/agent and the app that fetched it.", "The macOS equivalent of Mark-of-the-Web; the LSQuarantine extended attribute also rides on the file itself.", "Only apps that set quarantine (browsers, Mail) create rows — curl and scp do not."],
+  "safari_hist": ["History.db (SQLite) holds pages and visit times; Downloads.plist alongside it records download source and destination.", "Proves browsing and web-delivered files; Safari also keeps per-tab session state.", "Cross-check the quarantine database for a download's origin."],
+  "chrome_mac": ["Chrome on macOS uses the identical Chromium schema (urls, visits, downloads), just under ~/Library/Application Support.", "Check it whenever Chrome, not Safari, was the browser in use.", "Cookies and Login Data nearby add session and credential context."],
+  "tcc": ["TCC.db records which application was granted Full Disk Access, Accessibility, Camera, Microphone, Screen Recording and more, with an allowed flag and timestamp.", "Abused permissions (Accessibility, Full Disk Access) power keyloggers and data theft — a rogue grant is a red flag.", "It is SIP-protected; collect it from an image, not with a live copy."],
+  "installhistory": ["InstallHistory.plist lists each package and update with its display name, identifier, version, date and installing process.", "Places a tool on the box and flags installer-based delivery.", "Pair with the receipts in /var/db/receipts (*.bom / *.plist) for the installed file lists."],
+  "dock": ["com.apple.dock.plist lists persistent-apps (kept in the Dock) and recent-apps with their bundle paths.", "Weak on its own, but it shows what the user kept at hand and recently opened.", "Timing comes from the plist's modification time, not per-entry timestamps."],
+  "audit": ["/var/audit holds OpenBSM (BSM) trails: per-subject records of logins, execve and privilege use, when auditing is enabled.", "Coverage depends on the flags in audit_control; read with `praudit` or `ausearch`.", "Auditing is often off by default, so its presence is a bonus."],
+  "zsh_history": ["A plain-text history of commands typed in zsh (the default shell since Catalina), in the user's home directory.", "Names the commands, but has no timestamps unless EXTENDED_HISTORY was set, is written on shell exit, and is trivially editable.", "Corroborate with the Unified Log/audit, and check .zsh_sessions and any other shells present."],
+  "bash_history": ["A plain-text history of commands typed in bash (the default shell before Catalina), in the user's home directory.", "No timestamps unless HISTTIMEFORMAT was set, written on shell exit, and trivially editable.", "Corroborate elsewhere and never rely on it alone."],
+};
+
+/* ------------------------- registry (Windows only) ------------------------ */
+/* Two-phase Level-1 add-on: find the hive file in Explorer, then it opens as a
+   regedit-style tree and you navigate to the key. Each entry: the display root
+   of the opened hive, the key path within it (forward-slash rel), whether a
+   value inside also counts (prefix), and a teaching note. */
+const REG = {
+  shimcache:  {root:'SYSTEM', key:'ControlSet001/Control/Session Manager/AppCompatCache',
+    note:'On a live system this is CurrentControlSet; a dead hive shows ControlSet001. BAM sits nearby under Services\\bam\\State\\UserSettings.'},
+  services:   {root:'SYSTEM', key:'ControlSet001/Services', prefix:true,
+    note:'Each service is a subkey holding ImagePath, Start type and the account it runs as.'},
+  usbstor:    {root:'SYSTEM', key:'ControlSet001/Enum/USBSTOR', prefix:true,
+    note:'One subkey per device model, then per serial number, with connect timestamps in the device Properties.'},
+  mounteddev: {root:'SYSTEM', key:'MountedDevices',
+    note:'Values tie \\DosDevices\\X: drive letters and volume GUIDs to devices.'},
+  run_sys:    {root:'SOFTWARE', key:'Microsoft/Windows/CurrentVersion/Run', prefix:true,
+    note:'Machine-wide autostart values; RunOnce sits right beside it.'},
+  run_user:   {root:'NTUSER.DAT', key:'Software/Microsoft/Windows/CurrentVersion/Run', prefix:true,
+    note:'Per-user autostart values; RunOnce sits right beside it.'},
+  userassist: {root:'NTUSER.DAT', key:'Software/Microsoft/Windows/CurrentVersion/Explorer/UserAssist', prefix:true,
+    note:'One GUID per launch type ({CEBFF5CD-...}=executables), each with a ROT13-encoded Count subkey.'},
+  recentdocs: {root:'NTUSER.DAT', key:'Software/Microsoft/Windows/CurrentVersion/Explorer/RecentDocs', prefix:true,
+    note:'An MRU of opened files, grouped into per-extension subkeys.'},
+  shellbags:  {root:'UsrClass.dat', key:'Local Settings/Software/Microsoft/Windows/Shell/BagMRU', prefix:true,
+    note:'BagMRU stores the browsed folder tree; Bags holds the matching view settings.'},
+  muicache:   {root:'UsrClass.dat', key:'Local Settings/Software/Microsoft/Windows/Shell/MuiCache', prefix:true,
+    note:'One value per executable path with its FileDescription.'},
+  sam:        {root:'SAM', key:'SAM/Domains/Account/Users', prefix:true,
+    note:'One subkey per RID; the Names subkey maps account names to RIDs.'},
+  amcache:    {root:'Amcache.hve', key:'Root/InventoryApplicationFile', prefix:true,
+    note:'One subkey per executable, carrying SHA-1, full path and first-seen time.'},
+};
+/* per-hive key layout: target keys plus decoy keys, for the regedit tree */
+const REG_TREES = {
+  'SYSTEM':[
+    'ControlSet001/Control/Session Manager/AppCompatCache/','ControlSet001/Control/Session Manager/Memory Management/',
+    'ControlSet001/Control/Session Manager/Environment/','ControlSet001/Control/ComputerName/ComputerName/',
+    'ControlSet001/Control/TimeZoneInformation/','ControlSet001/Control/CrashControl/','ControlSet001/Control/Windows/',
+    'ControlSet001/Services/bam/State/UserSettings/S-1-5-21-1004336348-1177238915-682003330-1001/',
+    'ControlSet001/Services/Tcpip/Parameters/','ControlSet001/Services/Dnscache/Parameters/',
+    'ControlSet001/Services/LanmanServer/Parameters/','ControlSet001/Services/W32Time/',
+    'ControlSet001/Enum/USBSTOR/Disk&Ven_SanDisk&Prod_Cruzer_Blade&Rev_1.00/4C531001521254108192&0/',
+    'ControlSet001/Enum/USB/','ControlSet001/Enum/PCI/','ControlSet001/Enum/SWD/',
+    'MountedDevices/','Select/','Setup/','ControlSet002/Control/','ControlSet002/Services/','WPA/',
+  ],
+  'SOFTWARE':[
+    'Microsoft/Windows/CurrentVersion/Run/','Microsoft/Windows/CurrentVersion/RunOnce/',
+    'Microsoft/Windows/CurrentVersion/Uninstall/','Microsoft/Windows/CurrentVersion/Explorer/',
+    'Microsoft/Windows/CurrentVersion/Policies/Explorer/','Microsoft/Windows NT/CurrentVersion/Winlogon/',
+    'Microsoft/Windows NT/CurrentVersion/ProfileList/','Microsoft/Windows Defender/','Microsoft/.NETFramework/',
+    'Microsoft/Cryptography/','Classes/','Policies/Microsoft/Windows/','Wow6432Node/Microsoft/Windows/CurrentVersion/Run/','Google/Chrome/',
+  ],
+  'NTUSER.DAT':[
+    'Software/Microsoft/Windows/CurrentVersion/Run/','Software/Microsoft/Windows/CurrentVersion/RunOnce/',
+    'Software/Microsoft/Windows/CurrentVersion/Explorer/UserAssist/{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}/Count/',
+    'Software/Microsoft/Windows/CurrentVersion/Explorer/UserAssist/{F4E57C4B-2036-45F0-A9AB-443BCFE33D9F}/Count/',
+    'Software/Microsoft/Windows/CurrentVersion/Explorer/RecentDocs/.pdf/','Software/Microsoft/Windows/CurrentVersion/Explorer/RecentDocs/.docx/',
+    'Software/Microsoft/Windows/CurrentVersion/Explorer/RecentDocs/.zip/','Software/Microsoft/Windows/CurrentVersion/Explorer/RecentDocs/Folder/',
+    'Software/Microsoft/Windows/CurrentVersion/Explorer/RunMRU/',
+    'Software/Microsoft/Windows/CurrentVersion/Explorer/TypedPaths/','Software/Microsoft/Windows/CurrentVersion/Explorer/ComDlg32/OpenSavePidlMRU/',
+    'Software/Microsoft/Office/16.0/Word/File MRU/','Software/Microsoft/Terminal Server Client/Servers/',
+    'Software/Classes/','Environment/','Keyboard Layout/','Console/','Network/',
+  ],
+  'UsrClass.dat':[
+    'Local Settings/Software/Microsoft/Windows/Shell/BagMRU/0/0/','Local Settings/Software/Microsoft/Windows/Shell/BagMRU/1/',
+    'Local Settings/Software/Microsoft/Windows/Shell/BagMRU/2/','Local Settings/Software/Microsoft/Windows/Shell/Bags/1/Shell/',
+    'Local Settings/Software/Microsoft/Windows/Shell/MuiCache/','Local Settings/Software/Microsoft/Windows/CurrentVersion/TrayNotify/',
+    'Local Settings/MrtCache/','CLSID/','Wow6432Node/CLSID/',
+  ],
+  'SAM':[
+    'SAM/Domains/Account/Users/000001F4/','SAM/Domains/Account/Users/000003E8/',
+    'SAM/Domains/Account/Users/Names/Administrator/','SAM/Domains/Account/Users/Names/j.doe/',
+    'SAM/Domains/Account/Groups/','SAM/Domains/Builtin/Aliases/','SAM/RXACT/',
+  ],
+  'Amcache.hve':[
+    'Root/InventoryApplicationFile/0006f1c3e8b2a4d7|9c2e5a10/','Root/InventoryApplicationFile/0006a91b47f2c8e3|4d7b0f26/',
+    'Root/InventoryApplicationFile/00061d84c9a2e5f7|b3081ac4/',
+    'Root/InventoryApplicationShortcut/','Root/InventoryApplication/',
+    'Root/File/','Root/Programs/','Root/InventoryDriverBinary/',
+  ],
+};
+function regCapable(id){ return !!REG[id]; }
+function regActive(){ return S.regOn && S.os === 'win' && S.level === 1; }
+function regPool(){ return ART().filter(a => REG[a.id] && catMatch(a)); }
+let _regTreeCache = {};
+function regTree(root){
+  if (_regTreeCache[root]) return _regTreeCache[root];
+  const node = {name:root, dir:true, children:{}};
+  (REG_TREES[root]||[]).forEach(entry => {
+    const parts = entry.replace(/\/$/,'').split('/');
+    let n = node;
+    parts.forEach(p => { if (!n.children[p]) n.children[p] = {name:p, dir:true, children:{}}; n = n.children[p]; });
+  });
+  _regTreeCache[root] = node;
+  return node;
+}
+function regNodeAt(root, segs){ let n = regTree(root); for (const s of segs){ if (!n.children[s]) return null; n = n.children[s]; } return n; }
+function regMatches(id, selRel){
+  const r = REG[id]; if (!r) return false;
+  return r.prefix ? (selRel === r.key || selRel.indexOf(r.key + '/') === 0) : selRel === r.key;
+}
+function regDisplay(id, keyRel){ const r = REG[id]; return r.root + '\\' + (keyRel||r.key).replace(/\//g,'\\'); }
 
 /* ------------------------------ derived data ------------------------------ */
 const cfg = () => OSCFG[S.os];
@@ -576,8 +741,19 @@ function navigate(segs){
   segs.forEach((s,i) => { exp[segs.slice(0,i+1).join('/')] = true; });
   setState({cwd: segs, selected:null, history: S.history.concat([S.cwd]), expanded: exp});
 }
+function regNavigate(segs){
+  const exp = Object.assign({}, S.rExpanded);
+  segs.forEach((s,i) => { exp[segs.slice(0,i+1).join('/')] = true; });
+  setState({rCwd: segs, rSelected:null, rHistory: S.rHistory.concat([S.rCwd]), rExpanded: exp});
+}
+function regExpandTo(key){
+  const segs = key.split('/');
+  const exp = Object.assign({}, S.rExpanded);
+  segs.forEach((s,i) => { exp[segs.slice(0,i+1).join('/')] = true; });
+  return {rCwd: segs, rSelected:null, rExpanded: exp, rHistory: []};
+}
 function buildQueue(){
-  let ids = (isMulti() ? SCEN() : catArt()).map(x => x.id);
+  let ids = (regActive() ? regPool() : (isMulti() ? SCEN() : catArt())).map(x => x.id);
   ids = ids.map(v => [Math.random(), v]).sort((a,b) => a[0]-b[0]).map(p => p[1]);
   if (!ids.length) return [];
   const out = [];
@@ -621,9 +797,33 @@ function closeScenario(ok, found){
   }
   setState(patch);
 }
+function gradeRegDone(ok){
+  const a = cur(), r = REG[a.id];
+  setState({
+    score: S.score + (ok ? 15 : 0),
+    fb: {ok, reg:true, rows:[a.id], why:''},
+    log: S.log.concat([{ok, name:a.name, path: relToDisplay(a.rel)+'  →  '+regDisplay(a.id), why: ok?'':(a.why+' '+r.note)}]),
+  });
+}
 function confirm(){
   const q = cur();
   const multi = isMulti(), expert = isExpert(), need = q.need || 1;
+  /* registry-search: phase 1 = open the right hive file, phase 2 = find the key */
+  if (regActive() && regCapable(q.id)){
+    if (S.phase === 1){
+      if (!S.selected) return;
+      if (matches(q, S.selected))
+        setState({phase:2, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, selected:null,
+          flash:{ok:true, text: q.rel.split('/').pop()+' opened. Now navigate to the key.'}});
+      else
+        setState({wrong:S.wrong+1, selected:null, flash:{ok:false, text:'That is not the hive that holds it. Open the right hive file.'}});
+    } else {
+      if (!S.rSelected) return;
+      if (regMatches(q.id, S.rSelected)) gradeRegDone(true);
+      else setState({flash:{ok:false, text:'Not the right key. Keep navigating the hive.'}});
+    }
+    return;
+  }
   if (expert && multi){
     if (!q || !S.typed.trim()) return;
     const hit = q.pool.filter(id => S.found.indexOf(id)<0).find(id => typedMatches(art(id), S.typed));
@@ -728,9 +928,24 @@ function startScreen(){
   }).join('');
 
   const nArt = catArt().length, nScen = SCEN().length;
-  const poolNote = isMulti()
-    ? nScen+' scenario'+(nScen===1?'':'s')+' in this category and version'
-    : nArt+' artifact'+(nArt===1?'':'s')+' in this category and version';
+  const regActiveNow = regActive();
+  const nReg = regActiveNow ? regPool().length : 0;
+  const poolCount = regActiveNow ? nReg : (isMulti()?nScen:nArt);
+  const poolNote = regActiveNow
+    ? nReg+' registry artifact'+(nReg===1?'':'s')+' in this category and version'
+    : (isMulti()
+      ? nScen+' scenario'+(nScen===1?'':'s')+' in this category and version'
+      : nArt+' artifact'+(nArt===1?'':'s')+' in this category and version');
+
+  /* registry-search toggle (Windows only; applies at Level 1) */
+  const regToggle = S.os==='win' ? (function(){
+    const avail = S.level===1, on = S.regOn && avail;
+    return label('registry search')
+      + '<div class="link" data-act="regtoggle" style="display:flex;align-items:center;gap:14px;margin-top:12px;width:100%;max-width:560px;padding:12px 16px;border-radius:10px;border:1px solid '+(on?'#2E3338':'#D9D9D9')+';background:'+(on?'#2E3338':'#fff')+';'+(avail?'':'opacity:.55;cursor:not-allowed')+'">'
+      + '<div style="flex-shrink:0;width:40px;height:22px;border-radius:11px;background:'+(on?'var(--green)':'#CFD4D7')+';position:relative"><div style="position:absolute;top:2px;left:'+(on?'20px':'2px')+';width:18px;height:18px;border-radius:50%;background:#fff"></div></div>'
+      + '<div style="min-width:0"><div style="font-size:16px;font-weight:600;color:'+(on?'#fff':'#333')+'">Registry search</div>'
+      + '<div style="font-size:13px;line-height:18px;color:'+(on?'rgba(255,255,255,.8)':'#777')+'">'+(avail?'Find the hive file, then open it and navigate to the key inside.':'Level 1 only — pick “Named artifact” to enable.')+'</div></div></div>';
+  })() : '';
 
   /* permanent explainer — lives in the right column of the start screen, so it
      teaches every first-time visitor without a popup, without any storage and
@@ -783,11 +998,13 @@ function startScreen(){
     + label('difficulty')
     + '<div style="display:flex;gap:12px;margin-top:12px;flex-wrap:wrap">'+levels+'</div>'
 
+    + regToggle
+
     + label('round length')
     + '<div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">'+lenRow+'</div>'
-    + '<div class="mono" style="font-size:12px;color:#A6A6A6;margin-top:10px">// '+E(poolNote)+(S.roundLen>(isMulti()?nScen:nArt)?', repeated to fill the round':'')+'</div>'
+    + '<div class="mono" style="font-size:12px;color:#A6A6A6;margin-top:10px">// '+E(poolNote)+(S.roundLen>poolCount?', repeated to fill the round':'')+'</div>'
 
-    + '<button class="btn" data-act="start" style="margin-top:30px"'+((isMulti()?nScen:nArt)===0?' aria-disabled="true"':'')+'>Start drill</button>'
+    + '<button class="btn" data-act="start" style="margin-top:30px"'+(poolCount===0?' aria-disabled="true"':'')+'>Start drill</button>'
     + '</div>'
     + '<aside class="start-aside">'+guide+'</aside>'
     + '</div></div>';
@@ -801,6 +1018,7 @@ function gameScreen(){
   if (!q) return '<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted)">No questions in this pool.</div>';
   const need = multi ? q.need : 1;
   const metaWide = S.vw >= 1180;
+  const twoPhase = regActive() && regCapable(q.id);
 
   /* left: task panel */
   const progress = S.queue.length ? Math.round(S.idx / S.queue.length * 100) : 0;
@@ -813,6 +1031,21 @@ function gameScreen(){
   panel += '<div><div class="mono" style="font-size:12px;color:var(--green)">'+(multi?'Prove':(expert?'Recall':'Locate'))+'</div>'
     + '<div style="font-size:26px;line-height:33px;font-weight:600;margin-top:4px;color:var(--ink)">'+E(q.name)+'</div>'
     + '<div style="font-size:17px;line-height:24px;color:var(--muted);margin-top:6px">'+E(q.sub)+'</div></div>';
+
+  /* two-phase stepper: find the hive, then the key */
+  if (twoPhase && !S.fb){
+    const step = (n,txt) => {
+      const active = S.phase === n, done = S.phase > n;
+      const bg = done ? 'var(--green)' : (active ? 'var(--green)' : '#fff');
+      const bd = (done||active) ? 'var(--green)' : '#D9D9D9';
+      const fg = (done||active) ? '#fff' : '#B8B8B8';
+      return '<div style="display:flex;align-items:center;gap:8px;flex:1">'
+        + '<div style="flex-shrink:0;width:22px;height:22px;border-radius:50%;background:'+bg+';border:1px solid '+bd+';color:'+fg+';font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center">'+(done?'✓':n)+'</div>'
+        + '<div style="font-size:13px;line-height:16px;color:'+(active?'var(--ink)':'#999')+';font-weight:'+(active?'600':'400')+'">'+txt+'</div></div>';
+    };
+    panel += '<div class="mono" style="font-size:12px;color:var(--green);margin-top:-6px">registry search</div>'
+      + '<div style="display:flex;gap:10px;align-items:center">'+step(1,'Open the hive')+step(2,'Find the key')+'</div>';
+  }
 
   /* evidence slots */
   if (multi){
@@ -836,7 +1069,7 @@ function gameScreen(){
   }
 
   /* hint */
-  if (S.hintShown && !multi && !expert){
+  if (S.hintShown && !multi && !expert && !twoPhase){
     const base = q.rel.split('/')[0], leaf = q.rel.split('/').pop();
     const hintTxt = HINTS[q.id] || ('Look for "'+leaf+'" somewhere under '+base+'.');
     panel += '<div style="background:var(--panel);border-left:2px solid var(--green);border-radius:0 5px 5px 0;padding:11px 14px;font-size:16px;line-height:22px;color:#555">'+E(hintTxt)+'</div>';
@@ -855,17 +1088,22 @@ function gameScreen(){
         + '<input id="typed" type="text" value="'+A(S.typed)+'" placeholder="'+A(c.placeholder)+'" spellcheck="false" autocomplete="off" '
         + 'style="width:100%;margin-top:6px;height:40px;border:1px solid #CACACA;border-radius:5px;padding:0 12px;font-family:var(--mono);font-size:14px;color:var(--ink);background:#fff;outline:none">'
         + '<div class="mono" style="font-size:12px;color:#A6A6A6;margin-top:6px">'+E(c.note)+'</div></div>';
+    } else if (twoPhase && S.phase === 2){
+      const sel = S.rSelected ? regDisplay(q.id, S.rSelected) : 'no key selected yet';
+      ctrl += '<div style="border:1px dashed #D9D9D9;border-radius:5px;padding:12px 14px">'
+        + '<div class="mono" style="font-size:12px;color:#A6A6A6">selected key</div>'
+        + '<div class="mono" style="font-size:14px;color:'+(S.rSelected?'var(--green)':'#B8B8B8')+';margin-top:4px;word-break:break-all">'+E(sel)+'</div></div>';
     } else {
       const sel = S.selected ? relToDisplay(S.selected) : 'nothing selected yet';
       ctrl += '<div style="border:1px dashed #D9D9D9;border-radius:5px;padding:12px 14px">'
-        + '<div class="mono" style="font-size:12px;color:#A6A6A6">selected</div>'
+        + '<div class="mono" style="font-size:12px;color:#A6A6A6">'+(twoPhase?'selected hive':'selected')+'</div>'
         + '<div class="mono" style="font-size:14px;color:'+(S.selected?'var(--green)':'#B8B8B8')+';margin-top:4px;word-break:break-all">'+E(sel)+'</div></div>';
     }
-    const ready = expert ? !!S.typed.trim() : !!S.selected;
-    const confLabel = multi ? (expert?'Log path':'Log evidence') : (expert?'Submit path':'Confirm');
+    const ready = twoPhase ? (S.phase===1 ? !!S.selected : !!S.rSelected) : (expert ? !!S.typed.trim() : !!S.selected);
+    const confLabel = twoPhase ? (S.phase===1?'Open hive':'Confirm key') : (multi ? (expert?'Log path':'Log evidence') : (expert?'Submit path':'Confirm'));
     ctrl += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
       + '<button class="btn" data-act="confirm"'+(ready?'':' aria-disabled="true"')+'>'+confLabel+'</button>';
-    if (!multi && !expert && !S.hintShown) ctrl += '<button class="btn out" data-act="hint">Hint</button>';
+    if (!multi && !expert && !twoPhase && !S.hintShown) ctrl += '<button class="btn out" data-act="hint">Hint</button>';
     ctrl += '<span class="link" data-act="skip" style="font-size:16px;color:#A6A6A6;text-decoration:underline">Give up</span>';
     ctrl += '</div></div>';
     panel += ctrl;
@@ -880,9 +1118,12 @@ function gameScreen(){
       rows += '<div style="display:flex;gap:10px;padding-top:12px;border-top:1px solid rgba(0,0,0,.08)">'
         + icon(ic.n, ic.c, 17)
         + '<div style="min-width:0"><div style="font-size:18px;font-weight:600">'+E(a.name)+'</div>'
-        + '<div class="mono" style="font-size:12px;color:#555;word-break:break-all">'+E(relToDisplay(a.rel))+'</div>'
+        + '<div class="mono revpath link" data-act="reveal" data-rel="'+A(a.rel)+'" data-prefix="'+(a.prefix?'1':'')+'" title="open this location" style="font-size:12px;color:var(--green);word-break:break-all">'+E(relToDisplay(a.rel))+' ↗</div>'
+        + (fb.reg && REG[id] ? '<div class="mono revpath link" data-act="rreveal" data-key="'+A(REG[id].key)+'" title="open this key" style="font-size:12px;color:var(--green);word-break:break-all;margin-top:2px">'+E(regDisplay(id))+' ↗</div>' : '')
         + '<div style="font-size:15px;line-height:21px;color:#444;margin-top:6px;overflow-wrap:anywhere">'+E(a.why)+'</div>'
-        + '<div class="mono" style="font-size:13px;color:#555;margin-top:5px;overflow-wrap:anywhere">Parse with '+E(a.tool)+'</div></div></div>';
+        + (fb.reg && REG[id] ? '<div style="font-size:14px;line-height:20px;color:#666;margin-top:6px;overflow-wrap:anywhere">'+E(REG[id].note)+'</div>' : '')
+        + '<div class="mono" style="font-size:13px;color:#555;margin-top:5px;overflow-wrap:anywhere">Parse with '+E(a.tool)+'</div>'
+        + '<div style="margin-top:8px"><span class="link" data-act="more" data-id="'+A(id)+'" style="display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:600;color:var(--green)">'+icon('target','#0E7A4A',14)+'Tell me more</span></div></div></div>';
     });
     const lastQ = S.idx >= S.queue.length-1;
     panel += '<div style="border-radius:0 5px 5px 0;padding:16px 18px;background:var(--panel);border-left:2px solid '+col+'">'
@@ -893,10 +1134,31 @@ function gameScreen(){
   }
   panel += '</div>';
 
-  /* right: explorer window */
-  const win = explorer(q);
+  /* right: explorer window (or the opened hive in phase 2) */
+  const win = (twoPhase && S.phase === 2) ? regEditor(q) : explorer(q);
 
-  return '<div style="flex:1;min-height:0;display:grid;grid-template-columns:minmax(280px,360px) minmax(0,1fr);gap:20px;padding:20px 28px 28px">'+panel+win+'</div>';
+  return '<div style="flex:1;min-height:0;display:grid;grid-template-columns:minmax(280px,360px) minmax(0,1fr);gap:20px;padding:20px 28px 28px">'+panel+win+'</div>'
+    + (S.more ? moreModal() : '');
+}
+
+/* "tell me more" briefing dialog */
+function moreModal(){
+  const a = art(S.more); if (!a) return '';
+  const bullets = (MORE[S.more]||[]).map(b => '<li style="margin-top:9px;line-height:22px">'+E(b)+'</li>').join('');
+  const catName = (CATS.find(c => c.id === a.cat)||{}).label || '';
+  const regLine = REG[S.more] ? '<div class="mono revpath link" data-act="rreveal" data-key="'+A(REG[S.more].key)+'" style="font-size:12px;color:var(--green);margin-top:3px;word-break:break-all">'+E(regDisplay(S.more))+' ↗</div>' : '';
+  return '<div data-act="moreClose" style="position:fixed;inset:0;z-index:60;background:rgba(20,24,28,.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;padding:24px">'
+    + '<div data-act="stop" style="width:100%;max-width:560px;max-height:86vh;overflow:auto;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.3);padding:26px 28px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">'
+      + '<div style="min-width:0"><div class="mono" style="font-size:12px;color:var(--green)">// artifact briefing'+(catName?' · '+E(catName.toLowerCase()):'')+'</div>'
+      + '<div style="font-size:26px;line-height:31px;font-weight:600;color:var(--ink);margin-top:5px">'+E(a.name)+'</div></div>'
+      + '<div class="link" data-act="moreClose" title="close" style="flex-shrink:0;font-size:26px;color:#B8B8B8;line-height:.8;padding:2px 4px">&times;</div></div>'
+    + '<div class="mono revpath link" data-act="reveal" data-rel="'+A(a.rel)+'" data-prefix="'+(a.prefix?'1':'')+'" style="font-size:12px;color:var(--green);margin-top:12px;word-break:break-all">'+E(relToDisplay(a.rel))+' ↗</div>'+regLine
+    + '<div style="font-size:16px;line-height:24px;color:#444;margin-top:14px;overflow-wrap:anywhere">'+E(a.why)+'</div>'
+    + (bullets ? '<ul style="margin:14px 0 0;padding-left:20px;font-size:15px;color:#3d3d3d">'+bullets+'</ul>' : '')
+    + '<div class="mono" style="font-size:13px;color:#555;margin-top:18px;padding-top:14px;border-top:1px solid var(--line);overflow-wrap:anywhere">Parse with '+E(a.tool)+'</div>'
+    + '<div style="margin-top:16px;text-align:right"><button class="btn sm" data-act="moreClose">Got it</button></div>'
+    + '</div></div>';
 }
 
 function explorer(q){
@@ -997,6 +1259,81 @@ function explorer(q){
     + overlay + chrome + toolbar + body + '</div>';
 }
 
+/* the opened hive — a regedit-style key tree (phase 2 of registry search) */
+function regEditor(q){
+  const root = REG[q.id].root;
+  const rootNode = regTree(root);
+  const cwd = S.rCwd;
+
+  const chrome = '<div style="flex-shrink:0;height:40px;background:#F3F3F3;display:flex;align-items:flex-end;justify-content:space-between;padding-left:8px">'
+    + '<div style="height:34px;background:#fff;border-radius:8px 8px 0 0;display:flex;align-items:center;gap:8px;padding:0 16px;max-width:340px">'
+    + icon('database','#5B8D9E',15)+'<div style="font-size:13px;color:#1B1B1B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Registry Editor</div></div>'
+    + '<div style="display:flex;align-items:center;height:40px;color:#444">'
+    + '<div style="width:44px;height:40px;display:flex;align-items:center;justify-content:center">&minus;</div>'
+    + '<div style="width:44px;height:40px;display:flex;align-items:center;justify-content:center;font-size:11px">&#9633;</div>'
+    + '<div style="width:44px;height:40px;display:flex;align-items:center;justify-content:center">&times;</div></div></div>';
+
+  /* address bar: Computer\<root>\<key path> in regedit style */
+  let crumbs = '<div class="link crumb" data-act="rnav" data-segs="" style="display:flex;align-items:center;gap:2px;flex-shrink:0"><div style="font-size:13px;color:#1B1B1B;padding:3px 6px;border-radius:3px;white-space:nowrap">'+E(root)+'</div>'+icon('caretRight','#A6A6A6',10)+'</div>';
+  cwd.forEach((s,i) => {
+    crumbs += '<div class="link crumb" data-act="rnav" data-segs="'+A(cwd.slice(0,i+1).join('/'))+'" style="display:flex;align-items:center;gap:2px;flex-shrink:0"><div style="font-size:13px;color:#1B1B1B;padding:3px 6px;border-radius:3px;white-space:nowrap">'+E(s)+'</div>'+icon('caretRight','#A6A6A6',10)+'</div>';
+  });
+  const upC = cwd.length ? '#444' : '#CACACA', backC = S.rHistory.length ? '#444' : '#CACACA';
+  const toolbar = '<div style="flex-shrink:0;height:48px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line)">'
+    + '<div class="link iconbtn" data-act="rback" style="width:30px;height:30px;border-radius:4px;display:flex;align-items:center;justify-content:center">'+icon('arrowLeft',backC,16)+'</div>'
+    + '<div style="width:30px;height:30px;display:flex;align-items:center;justify-content:center">'+icon('arrowRight','#CACACA',16)+'</div>'
+    + '<div class="link iconbtn" data-act="rup" style="width:30px;height:30px;border-radius:4px;display:flex;align-items:center;justify-content:center">'+icon('arrowUp',upC,16)+'</div>'
+    + '<div style="flex:1 1 auto;min-width:200px;height:32px;border:1px solid #D9D9D9;border-radius:4px;background:#fff;display:flex;align-items:center;padding:0 10px;overflow:hidden">'
+      + '<span class="mono" style="font-size:12px;color:#7C8A94;margin-right:6px;flex-shrink:0">Computer\\</span>'
+      + '<div style="flex:1;min-width:0;display:flex;align-items:center;gap:2px;overflow:hidden">'+crumbs+'</div></div></div>';
+
+  /* left: key tree */
+  let navRows = '';
+  const walk = (n, segs, depth) => {
+    const key = segs.join('/');
+    const dirs = sortKids(n);
+    const open = depth === 0 ? true : !!S.rExpanded[key];
+    const onSel = key === cwd.join('/');
+    const caret = dirs.length ? (open?'caretDown':'caretRight') : '';
+    navRows += '<div class="link navrow" data-act="rnav" data-segs="'+A(key)+'" style="height:28px;display:flex;align-items:center;gap:4px;border-radius:4px;padding-right:6px;padding-left:'+(6+depth*14)+'px;background:'+(onSel?'#ECEEF0':'transparent')+'">'
+      + '<div class="link" data-act="rtoggle" data-key="'+A(key)+'" style="width:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center">'+(caret?icon(caret,'#555',10):'')+'</div>'
+      + icon('folder', depth===0?'#5B8D9E':'#B79A5B',15)
+      + '<div style="font-size:13px;color:#1B1B1B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+E(depth===0?root:n.name)+'</div></div>';
+    if (open) dirs.forEach(ch => walk(ch, segs.concat([ch.name]), depth+1));
+  };
+  walk(rootNode, [], 0);
+
+  /* main: subkeys of current key */
+  const node = regNodeAt(root, cwd) || rootNode;
+  const kids = sortKids(node);
+  let list = '';
+  kids.forEach(ch => {
+    const segs = cwd.concat([ch.name]);
+    const rel = segs.join('/');
+    const on = S.rSelected === rel;
+    list += '<div class="link filerow" data-act="rsel" data-rel="'+A(rel)+'" data-open="'+A(rel)+'" style="height:30px;display:flex;align-items:center;padding:0 12px;margin:0 4px;border-radius:4px;background:'+(on?'#E3E7E9':'transparent')+'">'
+      + '<div style="flex:1 1 auto;min-width:150px;display:flex;align-items:center;gap:10px">'+icon('folder','#B79A5B',16)
+      + '<div style="font-size:13px;color:#1B1B1B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+E(ch.name)+'</div></div>'
+      + '<div style="flex:0 1 auto;font-size:12px;color:#999">Key</div></div>';
+  });
+  if (!kids.length){
+    list = '<div style="padding:14px 16px;font-size:13px;color:#999">This key has no subkeys — its values live here. Select it in the tree and confirm.</div>';
+  }
+
+  const colHead = '<div style="flex-shrink:0;height:30px;display:flex;align-items:center;border-bottom:1px solid var(--line);padding:0 12px;font-size:12px;color:#555">'
+    + '<div style="flex:1 1 auto;min-width:150px">Name</div><div style="flex:0 1 auto">Type</div></div>';
+  const status = '<div style="flex-shrink:0;height:28px;background:#FAFAFA;border-top:1px solid var(--line);display:flex;align-items:center;padding:0 12px;font-size:12px;color:#555;gap:16px">'
+    + '<div>'+kids.length+' keys</div><div>'+(S.rSelected?'1 key selected':'')+'</div></div>';
+
+  const body = '<div style="flex:1;min-height:420px;display:flex">'
+    + '<div style="width:clamp(150px,28%,260px);flex-shrink:0;background:#FAFAFA;border-right:1px solid var(--line);padding:8px 6px;overflow:auto">'+navRows+'</div>'
+    + '<div style="flex:1;min-width:0;display:flex;flex-direction:column">'+colHead
+    + '<div style="flex:1;overflow-y:auto;padding:4px 0">'+list+'</div>'+status+'</div></div>';
+
+  return '<div style="position:relative;min-width:0;display:flex;flex-direction:column;background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.08);overflow:hidden;font-family:\'Segoe UI Variable Text\',\'Segoe UI\',system-ui,sans-serif">'
+    + chrome + toolbar + body + '</div>';
+}
+
 /* ------ done screen ------ */
 function doneScreen(){
   const correct = S.log.filter(l => l.ok).length;
@@ -1078,16 +1415,20 @@ document.getElementById('app').addEventListener('click', e => {
     case 'os': {
       const k = el.getAttribute('data-os');
       _treeCache = {};
-      setState({os:k, ver: VERS[k].length-1, cwd:[], history:[], expanded:{}, selected:null, typed:''});
+      setState({os:k, ver: VERS[k].length-1, cwd:[], history:[], expanded:{}, selected:null, typed:'',
+        regOn: k==='win' ? S.regOn : false, phase:1, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null});
       break;
     }
     case 'ver': _treeCache = {}; setState({ver: +el.getAttribute('data-ver'), cwd:[], history:[], expanded:{}, selected:null, typed:''}); break;
     case 'cat': setState({cat: el.getAttribute('data-cat')}); break;
     case 'level': { const n = +el.getAttribute('data-level'); setState({level:n, roundLen:(n===2||n===4)?5:10, typed:''}); break; }
     case 'len': setState({roundLen: +el.getAttribute('data-len')}); break;
+    case 'regtoggle': if (S.os==='win' && S.level===1) setState({regOn: !S.regOn}); break;
     case 'start': {
-      if ((isMulti()?SCEN():catArt()).length === 0) break;
-      setState({screen:'game', queue: buildQueue(), idx:0, score:0, log:[], cwd:[], selected:null, typed:'', hintShown:false, fb:null, history:[], found:[], wrong:0, flash:null});
+      const pool = regActive() ? regPool() : (isMulti()?SCEN():catArt());
+      if (pool.length === 0) break;
+      setState({screen:'game', queue: buildQueue(), idx:0, score:0, log:[], cwd:[], selected:null, typed:'', hintShown:false, fb:null, history:[], found:[], wrong:0, flash:null,
+        phase:1, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, more:null});
       break;
     }
     case 'quit': setState({screen:'done', fb:null}); break;
@@ -1103,6 +1444,42 @@ document.getElementById('app').addEventListener('click', e => {
     }
     case 'up': if (S.cwd.length) navigate(S.cwd.slice(0,-1)); break;
     case 'back': if (S.history.length){ const h = S.history.slice(); const prev = h.pop(); setState({cwd:prev, history:h, selected:null}); } break;
+    case 'rnav': regNavigate(el.getAttribute('data-segs') ? el.getAttribute('data-segs').split('/') : []); break;
+    case 'rtoggle': {
+      e.stopPropagation();
+      const key = el.getAttribute('data-key');
+      const open = key ? !!S.rExpanded[key] : true;
+      const exp = Object.assign({}, S.rExpanded); exp[key] = !open;
+      setState({rExpanded: exp});
+      break;
+    }
+    case 'rup': if (S.rCwd.length) regNavigate(S.rCwd.slice(0,-1)); break;
+    case 'rback': if (S.rHistory.length){ const h = S.rHistory.slice(); const prev = h.pop(); setState({rCwd:prev, rHistory:h, rSelected:null}); } break;
+    case 'rsel': {
+      const rel = el.getAttribute('data-rel');
+      const now = Date.now();
+      if (_lastClick.rel === rel && (now - _lastClick.t) < 400){
+        _lastClick = {rel:null, t:0};
+        regNavigate(rel.split('/'));
+      } else {
+        _lastClick = {rel, t:now};
+        setState({rSelected: rel});
+      }
+      break;
+    }
+    case 'reveal': {
+      const rel = el.getAttribute('data-rel'), prefix = el.getAttribute('data-prefix')==='1';
+      setState(Object.assign({phase:1, more:null}, expandTo(rel, prefix)));
+      break;
+    }
+    case 'rreveal': {
+      const key = el.getAttribute('data-key');
+      setState(Object.assign({phase:2, more:null}, regExpandTo(key)));
+      break;
+    }
+    case 'more': setState({more: el.getAttribute('data-id')}); break;
+    case 'moreClose': setState({more:null}); break;
+    case 'stop': break;
     case 'sel': {
       const rel = el.getAttribute('data-rel');
       const canOpen = el.hasAttribute('data-open'); /* set only for folders */
@@ -1121,10 +1498,15 @@ document.getElementById('app').addEventListener('click', e => {
     }
     case 'confirm': if (!(el.getAttribute('aria-disabled')==='true')) confirm(); break;
     case 'hint': setState({hintShown:true}); break;
-    case 'skip': if (isMulti()) closeScenario(false, S.found); else gradeSingle(false); break;
+    case 'skip':
+      if (regActive() && regCapable(cur().id)) gradeRegDone(false);
+      else if (isMulti()) closeScenario(false, S.found);
+      else gradeSingle(false);
+      break;
     case 'next': {
       if (S.idx >= S.queue.length-1) setState({screen:'done', fb:null});
-      else setState({idx:S.idx+1, fb:null, selected:null, typed:'', hintShown:false, found:[], wrong:0, flash:null});
+      else setState({idx:S.idx+1, fb:null, selected:null, typed:'', hintShown:false, found:[], wrong:0, flash:null,
+        phase:1, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, more:null});
       break;
     }
   }
