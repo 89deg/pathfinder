@@ -32,6 +32,8 @@
   .btn.sm{height:40px;font-size:16px;padding:0 16px}
   .btn.out{background:#fff;color:var(--ink);border:1px solid #CACACA}
   .btn.out:hover{background:#F3F3F3;color:var(--ink)}
+  .btn.danger{background:var(--red)}
+  .btn.danger:hover{background:#6B1A22}
   .chip{cursor:pointer;user-select:none}
   /* explorer rows hover */
   .navrow:hover,.filerow:hover{background:#EFEFEF!important}
@@ -1077,7 +1079,8 @@ function gameScreen(){
   /* flash */
   if (S.flash && !S.fb){
     const col = S.flash.ok ? '#155537' : S.red;
-    panel += '<div style="border-radius:0 5px 5px 0;padding:11px 14px;font-size:16px;background:var(--panel);border-left:2px solid '+col+';color:'+col+'">'+E(S.flash.text)+'</div>';
+    const fbg = S.flash.ok ? '#E8F3EC' : '#FBEAEC';
+    panel += '<div style="border-radius:6px;padding:11px 14px;font-size:16px;background:'+fbg+';border-left:4px solid '+col+';color:'+col+'">'+E(S.flash.text)+'</div>';
   }
 
   if (!S.fb){
@@ -1126,11 +1129,12 @@ function gameScreen(){
         + '<div style="margin-top:8px"><span class="link" data-act="more" data-id="'+A(id)+'" style="display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:600;color:var(--green)">'+icon('target','#0E7A4A',14)+'Tell me more</span></div></div></div>';
     });
     const lastQ = S.idx >= S.queue.length-1;
-    panel += '<div style="border-radius:0 5px 5px 0;padding:16px 18px;background:var(--panel);border-left:2px solid '+col+'">'
-      + '<div style="font-size:23px;font-weight:600;color:'+col+'">'+E(title)+'</div>'
+    const bg = fb.ok ? '#E8F3EC' : '#FBEAEC';
+    panel += '<div style="border-radius:8px;padding:16px 18px;background:'+bg+';border-left:4px solid '+col+'">'
+      + '<div style="display:flex;align-items:center;gap:10px">'+icon(fb.ok?'check':'x', col, 22)+'<div style="font-size:23px;font-weight:600;color:'+col+'">'+E(title)+'</div></div>'
       + (fb.why?'<div style="font-size:16px;line-height:23px;color:#444;margin-top:10px;overflow-wrap:anywhere">'+E(fb.why)+'</div>':'')
       + '<div style="display:flex;flex-direction:column;gap:12px;margin-top:14px">'+rows+'</div>'
-      + '<button class="btn" data-act="next" style="margin-top:16px">'+(lastQ?'See results':(multi?'Next case':'Next artifact'))+'</button></div>';
+      + '<button class="btn'+(fb.ok?'':' danger')+'" data-act="next" style="margin-top:16px">'+(lastQ?'See results':(multi?'Next case':'Next artifact'))+'</button></div>';
   }
   panel += '</div>';
 
