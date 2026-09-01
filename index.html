@@ -41,6 +41,12 @@
   .link{cursor:pointer}
   .fade{animation:fade .18s ease}
   @keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+  /* start-screen two-column layout: controls left, permanent guide right */
+  .start-wrap{display:grid;grid-template-columns:minmax(0,1fr) 336px;gap:44px;align-items:start}
+  .start-aside{background:#fff;border:1px solid rgba(0,0,0,.07);border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.05);padding:22px 24px}
+  @media (max-width:1040px){
+    .start-wrap{grid-template-columns:1fr;max-width:700px!important;gap:30px}
+  }
   ::-webkit-scrollbar{width:10px;height:10px}
   ::-webkit-scrollbar-thumb{background:#D2D6D9;border-radius:6px;border:2px solid transparent;background-clip:content-box}
   ::-webkit-scrollbar-thumb:hover{background:#B9BEC2;background-clip:content-box}
@@ -726,8 +732,38 @@ function startScreen(){
     ? nScen+' scenario'+(nScen===1?'':'s')+' in this category and version'
     : nArt+' artifact'+(nArt===1?'':'s')+' in this category and version';
 
-  return '<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:48px 28px">'
-    + '<div style="width:100%;max-width:780px">'
+  /* permanent explainer — lives in the right column of the start screen, so it
+     teaches every first-time visitor without a popup, without any storage and
+     without ever nagging returning users. */
+  const stepRows = [
+    'Pick an operating system, version, category and difficulty on the left.',
+    'Read the artifact — or the scenario — you have to locate.',
+    'Walk the file tree and select its path. Double-click folders to open them, or use the sidebar.',
+    'Confirm. Every answer explains what the artifact proves and which tool parses it.',
+  ].map((t,i) => '<div style="display:flex;gap:10px;margin-top:'+(i?9:8)+'px">'
+    + '<div style="flex-shrink:0;width:20px;height:20px;border-radius:50%;background:var(--green);color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;margin-top:1px">'+(i+1)+'</div>'
+    + '<div style="font-size:15px;line-height:21px;color:#444">'+E(t)+'</div></div>').join('');
+  const lvlRows = [
+    ['1','Named artifact','Find one artifact’s path in the explorer.'],
+    ['2','Prove it','Log several artifacts that together make a case.'],
+    ['3','From memory','Explorer locked — type the full path.'],
+    ['4','Case from memory','A whole scenario, every path typed blind.'],
+  ].map(r => '<div style="display:flex;gap:8px;margin-top:8px">'
+    + '<span class="mono" style="flex-shrink:0;color:var(--green);font-size:13px;font-weight:600;width:20px">L'+r[0]+'</span>'
+    + '<div style="min-width:0"><span style="font-size:15px;font-weight:600;color:#333">'+E(r[1])+'</span> <span style="font-size:14px;color:#777">'+E(r[2])+'</span></div></div>').join('');
+  const guide = ''
+    + '<div class="mono" style="font-size:13px;color:var(--green)">// how it works</div>'
+    + '<div style="font-size:23px;line-height:29px;font-weight:600;margin-top:8px;color:var(--ink)">A drill for finding artifacts</div>'
+    + '<div style="font-size:16px;line-height:23px;color:#555;margin-top:10px;text-wrap:pretty">pathfinder drops you into a rebuilt Windows Explorer or macOS Finder. Each task names a real forensic artifact — you find the file or folder where it actually lives on disk.</div>'
+    + '<div class="mono" style="font-size:12px;letter-spacing:.6px;color:var(--grey);margin-top:22px">the loop</div>'
+    + '<div style="margin-top:6px">'+stepRows+'</div>'
+    + '<div class="mono" style="font-size:12px;letter-spacing:.6px;color:var(--grey);margin-top:22px">the four levels</div>'
+    + '<div style="margin-top:4px">'+lvlRows+'</div>'
+    + '<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line);font-size:14px;line-height:20px;color:#777;text-wrap:pretty">Hints cost points. No accounts, no cookies — nothing you do here ever leaves your device.</div>';
+
+  return '<div style="flex:1;display:flex;justify-content:center;padding:48px 28px">'
+    + '<div class="start-wrap" style="width:100%;max-width:1160px">'
+    + '<div class="start-main">'
     + '<div class="mono" style="font-size:13px;color:var(--green)">// program execution &amp; forensic artifacts</div>'
     + '<div style="font-size:45px;line-height:52px;font-weight:600;margin-top:12px;color:var(--ink)">Find the artifact.</div>'
     + '<div class="mono" style="font-size:14px;color:var(--grey);margin-top:8px">'+E(startTag)+'</div>'
@@ -752,6 +788,8 @@ function startScreen(){
     + '<div class="mono" style="font-size:12px;color:#A6A6A6;margin-top:10px">// '+E(poolNote)+(S.roundLen>(isMulti()?nScen:nArt)?', repeated to fill the round':'')+'</div>'
 
     + '<button class="btn" data-act="start" style="margin-top:30px"'+((isMulti()?nScen:nArt)===0?' aria-disabled="true"':'')+'>Start drill</button>'
+    + '</div>'
+    + '<aside class="start-aside">'+guide+'</aside>'
     + '</div></div>';
 }
 function label(t){ return '<div class="mono" style="margin-top:30px;font-size:12px;letter-spacing:.6px;color:var(--grey)">'+E(t)+'</div>'; }
