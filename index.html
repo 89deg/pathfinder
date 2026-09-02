@@ -120,7 +120,7 @@ const WIN_ART = [
   /* -- execution -- */
   {id:'prefetch',cat:'exec',name:'Prefetch',sub:'Per-executable run records from the cache manager.',rel:'Windows/Prefetch',prefix:true,since:0,
    why:'One .pf file per executable, holding the first and last eight execution timestamps, a run counter and the files the binary loaded. Enabled on client Windows, off by default on Server.',tool:'PECmd'},
-  {id:'amcache',cat:'exec',name:'AmCache',sub:'Registry hive of binaries seen and run.',rel:'Windows/appcompat/Programs/Amcache.hve',since:1,
+  {id:'amcache',cat:'exec',name:'AmCache',sub:'Registry hive of binaries seen and run.',rel:'Windows/appcompat/Programs/Amcache.hve',since:1,folderOk:true,
    why:'Records full path, SHA-1, PE metadata and first-run timestamps for executables. It survives deletion of the binary, which makes it the go-to when the file itself is gone.',tool:'AmcacheParser'},
   {id:'recentfilecache',cat:'exec',name:'RecentFileCache',sub:'The pre-AmCache appcompat artifact (Win7).',rel:'Windows/appcompat/Programs/RecentFileCache.bcf',since:0,until:0,
    why:'Windows 7 before the AmCache era logs only newly executed binaries here, as a flat list of paths with no hashes and no per-file timestamps. AmCache replaces it from Windows 8 onward.',tool:'RecentFileCacheParser'},
@@ -128,8 +128,10 @@ const WIN_ART = [
    why:'The Program Compatibility Assistant writes executable path and last execution time as text, one entry per line. Only present from Windows 11 onward and often overlooked.',tool:'any text editor'},
   {id:'srum',cat:'exec',name:'SRUM',sub:'Resource usage: bytes moved, per process, per user.',rel:'Windows/System32/sru/SRUDB.dat',since:1,folderOk:true,
    why:'System Resource Usage Monitor keeps roughly 30 days of hourly rollups per application and user SID, including network bytes sent and received. Strong for proving execution plus data volume.',tool:'SrumECmd'},
-  {id:'shimcache',cat:'exec',name:'ShimCache & BAM',sub:'Presence and last-execution evidence in the registry.',rel:'Windows/System32/config/SYSTEM',since:0,
-   why:'ShimCache under ControlSet\\Control\\Session Manager\\AppCompatCache proves presence, not execution. BAM under Services\\bam\\State\\UserSettings gives a last-execution time per user SID.',tool:'AppCompatCacheParser, RECmd'},
+  {id:'shimcache',cat:'exec',name:'ShimCache (AppCompatCache)',sub:'Application-compatibility cache — proof a binary was present.',rel:'Windows/System32/config/SYSTEM',since:0,
+   why:'AppCompatCache under ControlSet\\Control\\Session Manager records the file path and the $Standard_Information modified time for binaries the shim engine encountered. It proves presence, not execution, and on Windows 10+ is written only at shutdown.',tool:'AppCompatCacheParser, RECmd'},
+  {id:'bam',cat:'exec',name:'BAM / DAM',sub:'Background Activity Moderator — last run time, per user.',rel:'Windows/System32/config/SYSTEM',since:1,
+   why:'The Background/Desktop Activity Moderator services record, under Services\\bam\\State\\UserSettings\\<SID>, the full path and a last-execution FILETIME for each program a user ran. Unlike ShimCache this is genuine execution evidence, tied to a user SID.',tool:'RECmd, BAM parser'},
   {id:'userassist',cat:'exec',name:'UserAssist',sub:'GUI launch counts, tracked per user.',rel:'Users/j.doe/NTUSER.DAT',since:0,
    why:'Under Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\UserAssist, program names ROT13-encoded, plus run count and last execution. Covers only programs launched through the shell.',tool:'RegRipper, RECmd'},
   {id:'sec4688',cat:'exec',name:'Process creation events',sub:'Event ID 4688, when auditing is on.',rel:'Windows/System32/winevt/Logs/Security.evtx',since:0,
@@ -259,6 +261,7 @@ const HINTS = {
   "pca": "It's a plain-text file.",
   "srum": "It's a database file.",
   "shimcache": "It's a registry hive.",
+  "bam": "It's a registry hive.",
   "userassist": "Start in the Users folder.",
   "sec4688": "It's a Windows event log.",
   "sysmon": "It's a Windows event log.",
@@ -315,16 +318,16 @@ const WIN_SCEN = [
    pool:['userassist','jumplists','timeline','prefetch'],
    why:'UserAssist counts shell launches per user, Jump Lists tie the program to the files it opened, Timeline adds start and end times, and Prefetch corroborates from the system side.'},
   {id:'s_volume',cat:'exec',name:'Prove execution and how much data the process moved',sub:'Console binary, run interactively over RDP. Log three artifacts.',need:3,
-   pool:['prefetch','srum','sec4688','shimcache'],
+   pool:['prefetch','srum','sec4688','shimcache','bam'],
    why:'Prefetch and the SYSTEM hive place the binary in execution, SRUM adds bytes sent and received per process and user, and 4688 links it to the session and the parent process.'},
   {id:'s_deleted',cat:'exec',name:'The binary was wiped before imaging. Prove it ran anyway',sub:'Log three artifacts that outlive the file itself.',need:3,
-   pool:['amcache','prefetch','shimcache','sec4688','recentfilecache'],
+   pool:['amcache','prefetch','shimcache','bam','sec4688','recentfilecache'],
    why:'AmCache keeps path, SHA-1 and PE metadata after the file is gone, Prefetch keeps the run counter and timestamps, ShimCache in the SYSTEM hive keeps the path, and 4688 records the process independent of the file.'},
   {id:'s_cmdline',cat:'exec',name:'Recover the full command line of the process',sub:'Windows 11 host with Sysmon deployed. Log two artifacts.',need:2,
    pool:['sysmon','sec4688'],
    why:'Sysmon Event ID 1 always carries the command line, parent process and hashes. Security 4688 carries it only where command-line auditing was switched on.'},
   {id:'s_hives',cat:'exec',name:'Registry only: prove execution from hives',sub:'No event logs, no loose files. Log three artifacts.',need:3,
-   pool:['shimcache','userassist','amcache','muicache'],
+   pool:['shimcache','bam','userassist','amcache','muicache'],
    why:'ShimCache and BAM live in the SYSTEM hive, UserAssist and MUICache in the user hives, and AmCache is a hive itself. All are registry-format evidence of what ran or was present.'},
   {id:'s_persist',cat:'persist',name:'Find how the implant survives a reboot',sub:'It comes back every logon. Log three persistence points.',need:3,
    pool:['run_user','run_sys','tasks','services','startup','wmi'],
@@ -388,6 +391,14 @@ const WIN_DECOY = [
   'Users/j.doe/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/5f7b5f1e01b83767.automaticDestinations-ms',
   'Users/j.doe/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/f01b4d95cf55d32a.automaticDestinations-ms',
   'Users/j.doe/AppData/Roaming/Microsoft/Windows/Recent/CustomDestinations/590aee7bdd69b59b.customDestinations-ms',
+  'Users/j.doe/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/OneDrive.lnk',
+  'Users/j.doe/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/Spotify.lnk',
+  'Users/j.doe/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/updater.lnk',
+  'ProgramData/Microsoft/Windows/Start Menu/Programs/StartUp/Microsoft Teams.lnk',
+  'Windows/System32/Tasks/GoogleUpdateTaskMachineCore',
+  'Windows/System32/Tasks/OneDrive Standalone Update Task',
+  'Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/Reboot',
+  'Windows/System32/Tasks/Microsoft/Windows/Defrag/ScheduledDefrag',
   'Users/j.doe/ntuser.dat.LOG1',
   'Windows/appcompat/Programs/Amcache.hve.LOG1','Windows/appcompat/pca/PcaGeneralDb0.txt',
   'Windows/Boot/','Windows/Fonts/','Windows/Logs/CBS/',
@@ -459,7 +470,8 @@ const MORE = {
   "recentfilecache": ["Windows 7-only flat list of newly executed binaries — paths only, no hashes and no per-file timestamps.", "Replaced by AmCache from Windows 8 onward; if you are parsing it, you are on legacy."],
   "pca": ["Windows 11 plain text: PcaAppLaunchDic.txt maps executable path to last run time, one per line; PcaGeneralDb0.txt logs abnormal exits.", "Human-readable proof of execution with a timestamp, trivially parsed and very often overlooked.", "Only apps the Program Compatibility Assistant observed — not an exhaustive execution list."],
   "srum": ["ESE database with hourly rollups (~30-60 days) per application and user SID: bytes sent and received, CPU time, and the network interface used.", "One of the few artifacts that ties execution to data volume — strong for sizing exfiltration.", "Data is buffered in the registry and flushed periodically; the most recent hour may be missing until a clean shutdown."],
-  "shimcache": ["AppCompatCache in the SYSTEM hive: file path, the file's $Standard_Information modified time, and a flag. On Windows 10 entries are added on metadata change, NOT reliably on execution.", "Proves presence (and rough ordering on older Windows), not execution. BAM/DAM under Services\\bam gives a real last-execution time per user SID.", "Only written to disk at shutdown — a live-triage capture will miss the most recent entries."],
+  "shimcache": ["AppCompatCache in the SYSTEM hive: the file path plus the file's $Standard_Information modified time, one entry per binary the shim engine saw.", "Proves a binary was present (and, on older Windows, rough ordering) — NOT that it executed.", "On Windows 10+ it is written only at shutdown, so a live-triage capture misses the most recent entries."],
+  "bam": ["Under SYSTEM\\...\\Services\\bam\\State\\UserSettings\\<SID>, one value per executable path with a FILETIME last-execution time.", "Genuine execution evidence tied to a user SID — stronger than ShimCache, which only proves presence.", "Introduced in Windows 10 (1709); DAM is the Desktop Activity Moderator sibling on laptops."],
   "userassist": ["NTUSER Explorer\\UserAssist: program names ROT13-encoded, with run count, last-run time and total focus time.", "GUI/shell launches only (never command-line), so it proves a user interactively ran something.", "Per-user and easily reset — gaps can mean the key was cleared."],
   "sec4688": ["Security event 4688 = process creation: new PID, image path, parent process, and the invoking user; 4689 marks exit.", "The full command line is included ONLY if the 'Include command line in process creation events' audit policy was enabled — off by default.", "Parent-child linkage exposes living-off-the-land chains (e.g. winword.exe spawning powershell.exe)."],
   "sysmon": ["Sysmon event ID 1 always records the full command line, parent process, image, working directory, integrity level and file hashes.", "Far richer than 4688 — but only exists if Sysmon was deployed before the incident, and its config decides what was captured.", "Correlate with EID 3 (network) and 11 (file create) to reconstruct the full activity."],
@@ -517,6 +529,8 @@ const MORE = {
    of the opened hive, the key path within it (forward-slash rel), whether a
    value inside also counts (prefix), and a teaching note. */
 const REG = {
+  bam:        {root:'SYSTEM', key:'ControlSet001/Services/bam/State/UserSettings', prefix:true,
+    note:'One per-user-SID subkey; each value is a program path with a FILETIME last-run time. This is real execution evidence, unlike ShimCache.'},
   shimcache:  {root:'SYSTEM', key:'ControlSet001/Control/Session Manager/AppCompatCache',
     note:'On a live system this is CurrentControlSet; a dead hive shows ControlSet001. BAM sits nearby under Services\\bam\\State\\UserSettings.'},
   services:   {root:'SYSTEM', key:'ControlSet001/Services', prefix:true,
@@ -845,7 +859,12 @@ function confirm(){
   if (expert && multi){
     if (!q || !S.typed.trim()) return;
     const hit = q.pool.filter(id => S.found.indexOf(id)<0).find(id => typedMatches(art(id), S.typed));
-    if (!hit){ setState({wrong:S.wrong+1, typed:'', flash:{ok:false, text:'That path is not part of this answer. Try another artifact.'}}); return; }
+    if (!hit){
+      const w = S.wrong + 1, left = (need + 1) - w;
+      if (left <= 0){ S.wrong = w; closeScenario(false, S.found); return; }
+      setState({wrong:w, typed:'', flash:{ok:false, text:'That path is not part of this answer. '+left+' wrong '+(left===1?'pick':'picks')+' left.'}});
+      return;
+    }
     const found = S.found.concat([hit]);
     if (found.length >= need){ Object.assign(S,{found, typed:'', flash:null}); closeScenario(true, found); return; }
     setState({found, typed:'', flash:{ok:true, text: art(hit).name + ' logged. ' + (need-found.length) + ' to go.'}});
@@ -855,7 +874,12 @@ function confirm(){
   if (!S.selected || !q) return;
   if (!multi){ gradeSingle(matches(q, S.selected)); return; }
   const hit = q.pool.filter(id => S.found.indexOf(id)<0).find(id => matches(art(id), S.selected));
-  if (!hit){ setState({wrong:S.wrong+1, flash:{ok:false, text:'That path is not part of this answer. Keep looking.'}, selected:null}); return; }
+  if (!hit){
+    const w = S.wrong + 1, left = (need + 1) - w;
+    if (left <= 0){ S.wrong = w; closeScenario(false, S.found); return; }
+    setState({wrong:w, selected:null, flash:{ok:false, text:'That path is not part of this answer. '+left+' wrong '+(left===1?'pick':'picks')+' left.'}});
+    return;
+  }
   const found = S.found.concat([hit]);
   if (found.length >= need){ Object.assign(S,{found, flash:null}); closeScenario(true, found); return; }
   setState({found, selected:null, flash:{ok:true, text: art(hit).name + ' logged. ' + (need-found.length) + ' to go.'}});
