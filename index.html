@@ -138,8 +138,8 @@ const WIN_ART = [
    why:'Event ID 1 carries full command line, parent process, working directory, user and hashes. Richer than 4688, but only exists where Sysmon was deployed before the incident.',tool:'EvtxECmd, Chainsaw'},
   {id:'muicache',cat:'exec',name:'MUICache',sub:'Friendly-name cache for executables run in the GUI.',rel:'Users/j.doe/AppData/Local/Microsoft/Windows/UsrClass.dat',since:0,
    why:'Under Software\\Classes\\Local Settings\\...\\MuiCache in UsrClass.dat, one value per executable path with its FileDescription. Proves the binary was present and shell-launched, but carries no timestamps.',tool:'RegRipper, RECmd'},
-  {id:'timeline',cat:'exec',name:'Windows Timeline',sub:'Activity DB behind the old Task View history.',rel:'Users/j.doe/AppData/Local/ConnectedDevicesPlatform/L.j.doe/ActivitiesCache.db',since:1,folderOk:true,
-   why:'SQLite rows per activity with start and end time, the application ID and, for some entries, the arguments. The UI was dropped in Windows 11 but the database is frequently still populated.',tool:'WxTCmd'},
+  {id:'timeline',cat:'exec',name:'Windows Timeline',sub:'Activity DB behind the old Task View history.',rel:'Users/j.doe/AppData/Local/ConnectedDevicesPlatform/L.j.doe/ActivitiesCache.db',since:1,until:1,folderOk:true,
+   why:'SQLite rows per activity with start and end time, the application ID and, for some entries, the arguments. A Windows 10 artifact — the Task View timeline was removed in Windows 11.',tool:'WxTCmd'},
   {id:'jumplists',cat:'exec',name:'Jump Lists',sub:'Per-application usage lists in the user profile.',rel:'Users/j.doe/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations',prefix:true,since:0,
    why:'One .automaticDestinations-ms per application. The AppID identifies the program, the DestList stream records how often and when it was used and which files it opened.',tool:'JLECmd'},
 
@@ -431,7 +431,7 @@ const VERS = {
   win:[
     {id:'7',label:'Windows 7',note:'no SRUM · no Timeline · no PCA · RecentFileCache instead of AmCache'},
     {id:'10',label:'Windows 10',note:'no PCA launch log'},
-    {id:'11',label:'Windows 11',note:'everything present'},
+    {id:'11',label:'Windows 11',note:'PCA launch log added · Timeline retired'},
   ],
   mac:[
     {id:'10.12',label:'macOS 10.12 Sierra',note:'no KnowledgeC · no TCC · no ExecPolicy · bash shell'},
@@ -464,7 +464,7 @@ const MORE = {
   "sec4688": ["Security event 4688 = process creation: new PID, image path, parent process, and the invoking user; 4689 marks exit.", "The full command line is included ONLY if the 'Include command line in process creation events' audit policy was enabled — off by default.", "Parent-child linkage exposes living-off-the-land chains (e.g. winword.exe spawning powershell.exe)."],
   "sysmon": ["Sysmon event ID 1 always records the full command line, parent process, image, working directory, integrity level and file hashes.", "Far richer than 4688 — but only exists if Sysmon was deployed before the incident, and its config decides what was captured.", "Correlate with EID 3 (network) and 11 (file create) to reconstruct the full activity."],
   "muicache": ["UsrClass Shell\\MuiCache: one value per executable path with its FileDescription, cached when the shell displays it.", "Proves presence and preserves a friendly name, but carries no timestamps.", "Handy for recovering the original name of a binary that was later renamed or deleted."],
-  "timeline": ["ActivitiesCache.db (SQLite): per-activity start/end time, application id, and for some rows the file or URL and even clipboard payload.", "Reconstructs what a user did and when across applications; the Task View UI was dropped in Windows 11 but the database is often still written.", "Per-user, with limited retention (~30 days)."],
+  "timeline": ["ActivitiesCache.db (SQLite): per-activity start/end time, application id, and for some rows the file or URL and even clipboard payload.", "Reconstructs what a user did and when across applications — a Windows 10 artifact; the Task View timeline was removed in Windows 11.", "Per-user, with limited retention (~30 days)."],
   "jumplists": ["AutomaticDestinations *.automaticDestinations-ms: the AppID identifies the application; the embedded DestList records access count, first/last used and the target file paths.", "Proves a specific app opened specific files — including files on network shares or removable drives that are no longer attached.", "CustomDestinations is a different beast (pinned/task items), not usage history."],
   "run_user": ["HKCU Software\\Microsoft\\Windows\\CurrentVersion\\Run (+ RunOnce) launches a command at this user's logon; RunOnce deletes itself after firing.", "The cheapest persistence on Windows — no admin rights needed for the user hive.", "Inspect the value data for LOLBins (rundll32, mshta) and payloads in Temp/AppData."],
   "run_sys": ["HKLM SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run runs for every user at boot/logon; needs admin to write, so it signals privileged access.", "Winlogon Shell and Userinit values in the same hive are related, higher-impact persistence spots.", "Suspicious data: unsigned binaries or scripts launched from user-writable paths."],
