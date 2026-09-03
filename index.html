@@ -1121,7 +1121,7 @@ function gameScreen(){
 
   panel += '<div><div class="mono" style="font-size:12px;color:var(--green)">'+(multi?'Prove':(expert?'Recall':(S.matching?'Match':'Locate')))+'</div>'
     + '<div style="font-size:26px;line-height:33px;font-weight:600;margin-top:4px;color:var(--ink)">'+E(q.name)+'</div>'
-    + (S.matching ? '' : '<div style="font-size:17px;line-height:24px;color:var(--muted);margin-top:6px">'+E(q.sub)+'</div>')+'</div>';
+    + (matchActive() ? '' : '<div style="font-size:17px;line-height:24px;color:var(--muted);margin-top:6px">'+E(q.sub)+'</div>')+'</div>';
 
   /* two-phase stepper: find the hive, then the key */
   if (twoPhase && !S.fb){
@@ -1447,7 +1447,7 @@ function mobileSheet(q, multi, expert, twoPhase, need){
     + '<div style="height:4px;background:var(--line);border-radius:2px;margin-top:8px;overflow:hidden"><div style="height:4px;background:var(--green);width:'+progress+'%"></div></div>'
     + '<div class="mono" style="font-size:12px;color:var(--green);margin-top:16px">'+(multi?'Prove':(expert?'Recall':'Locate'))+(twoPhase?' · registry search':'')+'</div>'
     + '<div style="font-size:24px;line-height:30px;font-weight:600;color:var(--ink);margin-top:3px">'+E(q.name)+'</div>'
-    + '<div style="font-size:16px;line-height:23px;color:var(--muted);margin-top:6px">'+E(q.sub)+'</div>'
+    + (matchActive() ? '' : '<div style="font-size:16px;line-height:23px;color:var(--muted);margin-top:6px">'+E(q.sub)+'</div>')
     + (twoPhase?'<div style="font-size:14px;color:#666;margin-top:10px">Step '+S.phase+' of 2 — '+(S.phase===1?'find and open the hive file in the explorer.':'navigate the opened hive to the key.')+'</div>':'')
     + (multi?'<div class="mono" style="font-size:12px;color:var(--grey);margin-top:16px">logged evidence · '+S.found.length+'/'+need+'</div>'+slots:'')
     + hintBlock
