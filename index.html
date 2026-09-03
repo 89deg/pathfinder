@@ -860,9 +860,11 @@ function confirm(){
     if (!q || !S.typed.trim()) return;
     const hit = q.pool.filter(id => S.found.indexOf(id)<0).find(id => typedMatches(art(id), S.typed));
     if (!hit){
-      const w = S.wrong + 1, left = (need + 1) - w;
-      if (left <= 0){ S.wrong = w; closeScenario(false, S.found); return; }
-      setState({wrong:w, typed:'', flash:{ok:false, text:'That path is not part of this answer. '+left+' wrong '+(left===1?'pick':'picks')+' left.'}});
+      const limit = need <= 2 ? 1 : 2, w = S.wrong + 1;
+      if (w > limit){ S.wrong = w; closeScenario(false, S.found); return; }
+      const rem = limit - w;
+      const msg = rem > 0 ? (rem+' wrong '+(rem===1?'pick':'picks')+' left.') : 'One more wrong pick reveals the answer.';
+      setState({wrong:w, typed:'', flash:{ok:false, text:'That path is not part of this answer. '+msg}});
       return;
     }
     const found = S.found.concat([hit]);
@@ -875,9 +877,11 @@ function confirm(){
   if (!multi){ gradeSingle(matches(q, S.selected)); return; }
   const hit = q.pool.filter(id => S.found.indexOf(id)<0).find(id => matches(art(id), S.selected));
   if (!hit){
-    const w = S.wrong + 1, left = (need + 1) - w;
-    if (left <= 0){ S.wrong = w; closeScenario(false, S.found); return; }
-    setState({wrong:w, selected:null, flash:{ok:false, text:'That path is not part of this answer. '+left+' wrong '+(left===1?'pick':'picks')+' left.'}});
+    const limit = need <= 2 ? 1 : 2, w = S.wrong + 1;
+    if (w > limit){ S.wrong = w; closeScenario(false, S.found); return; }
+    const rem = limit - w;
+    const msg = rem > 0 ? (rem+' wrong '+(rem===1?'pick':'picks')+' left.') : 'One more wrong pick reveals the answer.';
+    setState({wrong:w, selected:null, flash:{ok:false, text:'That path is not part of this answer. '+msg}});
     return;
   }
   const found = S.found.concat([hit]);
