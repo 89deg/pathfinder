@@ -1169,7 +1169,9 @@ function gameScreen(){
         + '<div class="mono" style="font-size:12px;color:#A6A6A6">'+(twoPhase?'selected hive':'selected')+'</div>'
         + '<div class="mono" style="font-size:14px;color:'+(S.selected?'var(--green)':'#B8B8B8')+';margin-top:4px;word-break:break-all">'+E(sel)+'</div></div>';
     }
-    const ready = twoPhase ? (S.phase===1 ? !!S.selected : !!S.rSelected) : (expert ? !!S.typed.trim() : !!S.selected);
+    /* expert button stays enabled: typing doesn't re-render, so we must not
+       freeze it disabled — confirm() itself ignores an empty path */
+    const ready = twoPhase ? (S.phase===1 ? !!S.selected : !!S.rSelected) : (expert ? true : !!S.selected);
     const confLabel = twoPhase ? (S.phase===1?'Open hive':'Confirm key') : (multi ? (expert?'Log path':'Log evidence') : (expert?'Submit path':'Confirm'));
     ctrl += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
       + '<button class="btn" data-act="confirm"'+(ready?'':' aria-disabled="true"')+'>'+confLabel+'</button>';
