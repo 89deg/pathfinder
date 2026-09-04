@@ -880,17 +880,27 @@ function confirm(){
   if (S.matching) return; /* the match phase is resolved by choosing a card */
   /* registry-search: phase 1 = open the right hive file, phase 2 = find the key */
   if (regActive() && regCapable(q.id)){
+    const limit = 2; /* wrong picks allowed per phase before the answer is revealed */
     if (S.phase === 1){
       if (!S.selected) return;
-      if (matches(q, S.selected))
-        setState({phase:2, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, selected:null,
+      if (matches(q, S.selected)){
+        setState({phase:2, wrong:0, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, selected:null,
           flash:{ok:true, text: q.rel.split('/').pop()+' opened. Now navigate to the key.'}});
-      else
-        setState({wrong:S.wrong+1, selected:null, flash:{ok:false, text:'That is not the hive that holds it. Open the right hive file.'}});
+      } else {
+        const w = S.wrong + 1;
+        if (w > limit){ S.wrong = w; gradeRegDone(false); return; }
+        const rem = limit - w, msg = rem > 0 ? (rem+' wrong '+(rem===1?'pick':'picks')+' left.') : 'One more wrong pick reveals the answer.';
+        setState({wrong:w, selected:null, flash:{ok:false, text:'That is not the hive that holds it. '+msg}});
+      }
     } else {
       if (!S.rSelected) return;
       if (regMatches(q.id, S.rSelected)){ if (matchActive()) enterMatch(); else gradeRegDone(true); }
-      else setState({flash:{ok:false, text:'Not the right key. Keep navigating the hive.'}});
+      else {
+        const w = S.wrong + 1;
+        if (w > limit){ S.wrong = w; gradeRegDone(false); return; }
+        const rem = limit - w, msg = rem > 0 ? (rem+' wrong '+(rem===1?'pick':'picks')+' left.') : 'One more wrong pick reveals the answer.';
+        setState({wrong:w, flash:{ok:false, text:'Not the right key. '+msg}});
+      }
     }
     return;
   }
