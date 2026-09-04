@@ -1159,8 +1159,8 @@ function gameScreen(){
       + '<div class="mono" style="font-size:14px;color:var(--green)">'+S.found.length+' / '+need+'</div></div>'+slots+'</div>';
   }
 
-  /* hint */
-  if (S.hintShown && !multi && !expert && !twoPhase){
+  /* hint — available while locating (incl. registry phase 1), not while finding the key or matching */
+  if (S.hintShown && !multi && !expert && !S.matching && !(twoPhase && S.phase===2)){
     const base = q.rel.split('/')[0], leaf = q.rel.split('/').pop();
     const hintTxt = HINTS[q.id] || ('Look for "'+leaf+'" somewhere under '+base+'.');
     panel += '<div style="background:var(--panel);border-left:2px solid var(--green);border-radius:0 5px 5px 0;padding:11px 14px;font-size:16px;line-height:22px;color:#555">'+E(hintTxt)+'</div>';
@@ -1200,7 +1200,7 @@ function gameScreen(){
     const confLabel = twoPhase ? (S.phase===1?'Open hive':'Confirm key') : (multi ? (expert?'Log path':'Log evidence') : (expert?'Submit path':'Confirm'));
     ctrl += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
       + '<button class="btn" data-act="confirm"'+(ready?'':' aria-disabled="true"')+'>'+confLabel+'</button>';
-    if (!multi && !expert && !twoPhase && !S.hintShown) ctrl += '<button class="btn out" data-act="hint">Hint</button>';
+    if (!multi && !expert && !(twoPhase && S.phase===2) && !S.hintShown) ctrl += '<button class="btn out" data-act="hint">Hint</button>';
     ctrl += '<span class="link" data-act="skip" style="font-size:16px;color:#A6A6A6;text-decoration:underline">Give up</span>';
     ctrl += '</div></div>';
     panel += ctrl;
@@ -1433,7 +1433,7 @@ function mobileSheet(q, multi, expert, twoPhase, need){
     }
   }
   let hintBlock = '';
-  if (!multi && !expert && !twoPhase){
+  if (!multi && !expert && !(twoPhase && S.phase===2)){
     if (S.hintShown){ const base=q.rel.split('/')[0], leaf=q.rel.split('/').pop();
       hintBlock = '<div style="background:var(--panel);border-left:3px solid var(--green);border-radius:0 6px 6px 0;padding:11px 14px;font-size:15px;line-height:21px;color:#555;margin-top:14px">'+E(HINTS[q.id]||('Look for "'+leaf+'" under '+base+'.'))+'</div>';
     } else {
