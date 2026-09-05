@@ -534,7 +534,7 @@ const VERS = {
 
 /* ------------------------------- state ------------------------------------ */
 const S = {
-  screen:'start', os:'win', ver:2, cat:'all', level:1, roundLen:10,
+  screen:'start', os:'win', ver:2, cats:[], level:1, roundLen:10,
   queue:[], idx:0, score:0,
   cwd:[], history:[], expanded:{}, selected:null, typed:'',
   hintShown:false, fb:null, log:[], found:[], wrong:0, flash:null,
@@ -799,7 +799,7 @@ function isMulti(){ return S.level === 2 || S.level === 4; }
 function isExpert(){ return S.level === 3 || S.level === 4; }
 function isMobile(){ return S.vw < 760; }
 
-function catMatch(item){ return S.cat === 'all' || item.cat === S.cat; }
+function catMatch(item){ return S.cats.length === 0 || S.cats.indexOf(item.cat) >= 0; }
 
 function SCEN(){
   const ids = ART().map(a => a.id);
@@ -942,6 +942,7 @@ function buildQueue(){
   let ids = (isMulti() ? SCEN() : catArt()).map(x => x.id);
   ids = ids.map(v => [Math.random(), v]).sort((a,b) => a[0]-b[0]).map(p => p[1]);
   if (!ids.length) return [];
+  if (S.roundLen === 'all') return ids;              /* every item once, no repeats */
   const out = [];
   while (out.length < S.roundLen) out.push(ids[out.length % ids.length]);
   return out.slice(0, S.roundLen);
@@ -1126,7 +1127,7 @@ function startScreen(){
   }).join('');
 
   const catRow = CATS.map(ct => {
-    const on = S.cat === ct.id;
+    const on = ct.id === 'all' ? S.cats.length === 0 : S.cats.indexOf(ct.id) >= 0;
     return '<div class="link chip" data-act="cat" data-cat="'+ct.id+'" style="height:30px;padding:0 13px;display:flex;align-items:center;border-radius:5px;'+chipStyle(on)+'">'
       + '<span style="font-size:14px;white-space:nowrap">'+E(ct.short)+'</span></div>';
   }).join('');
@@ -1144,15 +1145,16 @@ function startScreen(){
       + '<div style="font-size:15px;margin-top:4px;color:'+(on?'rgba(255,255,255,.85)':'#777')+'">'+E(l.sub)+'</div></div>';
   }).join('');
 
-  const lens = isMulti() ? [3,5,8] : [5,10,15];
-  const lenRow = lens.map(n => {
-    const on = S.roundLen === n;
-    return '<div class="link chip" data-act="len" data-len="'+n+'" style="min-width:118px;height:46px;display:flex;align-items:center;justify-content:center;border-radius:5px;font-size:18px;font-weight:600;'+chipStyle(on)+'">'+n+(isMulti()?' questions':' artifacts')+'</div>';
-  }).join('');
-
   const nArt = catArt().length, nScen = SCEN().length;
   const poolCount = isMulti()?nScen:nArt;
-  const poolNote = (isMulti() ? nScen+' scenario'+(nScen===1?'':'s') : nArt+' artifact'+(nArt===1?'':'s'))+' in this category and version';
+
+  const lens = (isMulti() ? [3,5,8] : [5,10,15]).concat(['all']);
+  const lenRow = lens.map(n => {
+    const on = S.roundLen === n;
+    const label = n === 'all' ? 'all '+poolCount : (n+(isMulti()?' questions':' artifacts'));
+    return '<div class="link chip" data-act="len" data-len="'+n+'" style="min-width:118px;height:46px;padding:0 14px;display:flex;align-items:center;justify-content:center;border-radius:5px;font-size:18px;font-weight:600;'+chipStyle(on)+'">'+E(label)+'</div>';
+  }).join('');
+  const poolNote = (isMulti() ? nScen+' scenario'+(nScen===1?'':'s') : nArt+' artifact'+(nArt===1?'':'s'))+' in this selection and version';
 
   /* optional add-on challenges (Level 1) */
   const l1 = S.level === 1;
@@ -1879,9 +1881,16 @@ document.getElementById('app').addEventListener('click', e => {
       break;
     }
     case 'ver': _treeCache = {}; setState({ver: +el.getAttribute('data-ver'), cwd:[], history:[], expanded:{}, selected:null, typed:''}); break;
-    case 'cat': setState({cat: el.getAttribute('data-cat')}); break;
+    case 'cat': {
+      const id = el.getAttribute('data-cat');
+      if (id === 'all') { setState({cats: []}); break; }
+      const s = S.cats.slice(); const i = s.indexOf(id);
+      if (i >= 0) s.splice(i,1); else s.push(id);
+      setState({cats: s});   /* empty array = all categories */
+      break;
+    }
     case 'level': { const n = +el.getAttribute('data-level'); setState({level:n, roundLen:(n===2||n===4)?5:10, typed:''}); break; }
-    case 'len': setState({roundLen: +el.getAttribute('data-len')}); break;
+    case 'len': { const v = el.getAttribute('data-len'); setState({roundLen: v==='all' ? 'all' : +v}); break; }
     case 'regtoggle': if (S.os==='win' && S.level===1) setState({regOn: !S.regOn}); break;
     case 'matchtoggle': if (S.level===1) setState({matchOn: !S.matchOn}); break;
     case 'start': {
