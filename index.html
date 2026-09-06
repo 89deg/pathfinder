@@ -1798,10 +1798,16 @@ function radarChart(stats){
   const dp = stats.map((s,i)=>pt(i,R*Math.max(0.03,s.acc)).map(n=>n.toFixed(1)).join(',')).join(' ');
   let dots='', labs='';
   stats.forEach((s,i)=>{ const [dx,dy]=pt(i,R*Math.max(0.03,s.acc)); dots += '<circle cx="'+dx.toFixed(1)+'" cy="'+dy.toFixed(1)+'" r="3.2" fill="#0E7A4A"/>';
-    const [lx,ly]=pt(i,R+15); const anc = Math.abs(lx-cx)<10?'middle':(lx>cx?'start':'end');
-    labs += '<text x="'+lx.toFixed(1)+'" y="'+(ly+4).toFixed(1)+'" font-size="11" fill="#555" text-anchor="'+anc+'">'+E(s.label)+' '+Math.round(s.acc*100)+'%</text>'; });
-  return '<svg viewBox="0 0 320 300" width="100%" style="max-width:360px;display:block;margin:4px auto 0">'
+    const [lx,ly]=pt(i,R+14); const anc = Math.abs(lx-cx)<10?'middle':(lx>cx?'start':'end');
+    labs += '<text x="'+lx.toFixed(1)+'" y="'+(ly+4).toFixed(1)+'" font-size="11" fill="#555" text-anchor="'+anc+'">'+E(s.label)+'</text>'; });
+  return '<svg viewBox="0 0 320 300" width="100%" style="max-width:360px;display:block;margin:4px auto 0;overflow:visible">'
     + g + '<polygon points="'+dp+'" fill="rgba(14,122,74,.18)" stroke="#0E7A4A" stroke-width="2"/>' + dots + labs + '</svg>';
+}
+function catLegend(stats){
+  return '<div style="display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:center;margin-top:12px">'
+    + stats.map(s => { const pct=Math.round(s.acc*100), col=pct>=67?'#0E7A4A':(pct>=34?'#C9A227':S.red);
+      return '<span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#555"><span style="width:9px;height:9px;border-radius:50%;background:'+col+'"></span>'+E(s.label)+' <b style="color:#1E2226">'+pct+'%</b> <span style="color:#9AA0A6">('+s.correct+'/'+s.total+')</span></span>';
+    }).join('') + '</div>';
 }
 function catBars(stats){
   return stats.map(s => { const pct = Math.round(s.acc*100), col = pct>=67?'#0E7A4A':(pct>=34?'#C9A227':S.red);
@@ -1817,7 +1823,7 @@ function doneScreen(){
   const stats = catStats();
   const matrix = S.log.length ? ('<div style="background:#fff;border-radius:10px;box-shadow:0 0 4px rgba(0,0,0,.15);margin-top:24px;padding:20px 22px">'
       + '<div class="mono" style="font-size:12px;letter-spacing:.6px;color:var(--grey)">skill matrix &middot; accuracy by category</div>'
-      + (stats.length>=3 ? radarChart(stats) : catBars(stats))
+      + (stats.length>=3 ? radarChart(stats)+catLegend(stats) : catBars(stats))
       + '</div>') : '';
   let rows = '';
   S.log.forEach(l => {
