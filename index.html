@@ -797,6 +797,7 @@ function ART(){ return cfg().art.filter(present); }
 function art(id){ return ART().find(a => a.id === id); }
 function isMulti(){ return S.level === 2 || S.level === 4; }
 function isExpert(){ return S.level === 3 || S.level === 4; }
+function isRecall(){ return S.level === 5; }   /* pure description-match, no path */
 function isMobile(){ return S.vw < 760; }
 
 function catMatch(item){ return S.cats.length === 0 || S.cats.indexOf(item.cat) >= 0; }
@@ -1137,6 +1138,7 @@ function startScreen(){
     {n:2,kicker:'Level 2',label:'Prove it',sub:'One question, several artifacts to log.'},
     {n:3,kicker:'Level 3',label:'From memory',sub:c.shell+' locked. Type the full path.'},
     {n:4,kicker:'Level 4',label:'Case from memory',sub:'A whole case, every path typed blind.'},
+    {n:5,kicker:'Recall',label:'Name the evidence',sub:'No paths — match the artifact to what it proves.'},
   ].map(l => {
     const on = S.level === l.n;
     return '<div class="link" data-act="level" data-level="'+l.n+'" style="width:268px;padding:14px 16px;border-radius:10px;'+(on?'background:#2E3338;border:1px solid #2E3338':'background:#fff;border:1px solid #D9D9D9')+'">'
@@ -1162,9 +1164,9 @@ function startScreen(){
     + '<div style="flex-shrink:0;width:40px;height:22px;border-radius:11px;background:'+(on?'var(--green)':'#CFD4D7')+';position:relative"><div style="position:absolute;top:2px;left:'+(on?'20px':'2px')+';width:18px;height:18px;border-radius:50%;background:#fff"></div></div>'
     + '<div style="min-width:0"><div style="font-size:16px;font-weight:600;color:'+(on?'#fff':'#333')+'">'+title+'</div>'
     + '<div style="font-size:13px;line-height:18px;color:'+(on?'rgba(255,255,255,.8)':'#777')+'">'+desc+'</div></div></div>';
-  const addons = label('extra challenges (level 1)')
-    + (S.os==='win' ? mkToggle('regtoggle', S.regOn&&l1, l1, 'Registry search', l1?'For registry artifacts, also open the hive and find the key inside.':'Level 1 only — pick “Named artifact” to enable.') : '')
-    + mkToggle('matchtoggle', S.matchOn&&l1, l1, 'DFIR match', l1?'After you locate it, match the artifact to what it proves.':'Level 1 only — pick “Named artifact” to enable.');
+  const addons = l1 ? (label('extra challenges (level 1)')
+    + (S.os==='win' ? mkToggle('regtoggle', S.regOn, true, 'Registry search', 'For registry artifacts, also open the hive and find the key inside.') : '')
+    + mkToggle('matchtoggle', S.matchOn, true, 'DFIR match', 'After you locate it, match the artifact to what it proves.')) : '';
 
   /* permanent explainer — lives in the right column of the start screen, so it
      teaches every first-time visitor without a popup, without any storage and
@@ -1272,7 +1274,7 @@ function gameScreen(){
 
   panel += '<div><div class="mono" style="font-size:12px;color:var(--green)">'+(multi?'Prove':(expert?'Recall':(S.matching?'Match':'Locate')))+'</div>'
     + '<div style="font-size:26px;line-height:33px;font-weight:600;margin-top:4px;color:var(--ink)">'+E(q.name)+'</div>'
-    + (matchActive() ? '' : '<div style="font-size:17px;line-height:24px;color:var(--muted);margin-top:6px">'+E(q.sub)+'</div>')+'</div>';
+    + (matchActive()||isRecall() ? '' : '<div style="font-size:17px;line-height:24px;color:var(--muted);margin-top:6px">'+E(q.sub)+'</div>')+'</div>';
 
   /* two-phase stepper: find the hive, then the key */
   if (twoPhase && !S.fb){
@@ -1324,7 +1326,8 @@ function gameScreen(){
   }
 
   if (S.matching){
-    panel += '<div style="border:1px dashed #D9D9D9;border-radius:5px;padding:12px 14px;font-size:16px;line-height:23px;color:#555">Located it. Now drag <b>'+E(q.name)+'</b> onto the description of what it proves — or tap the right one. <b>One guess</b> — a wrong pick reveals the answer.</div>'
+    const lead = isRecall() ? 'Match <b>'+E(q.name)+'</b> to the description of what it proves.' : 'Located it. Now match <b>'+E(q.name)+'</b> to what it proves.';
+    panel += '<div style="border:1px dashed #D9D9D9;border-radius:5px;padding:12px 14px;font-size:16px;line-height:23px;color:#555">'+lead+' Drag it onto the right description, or tap. <b>One guess</b> — a wrong pick reveals the answer.</div>'
       + '<div style="display:flex;align-items:center;gap:12px"><span class="link" data-act="skip" style="font-size:16px;color:#A6A6A6;text-decoration:underline">Give up</span></div>';
   } else if (!S.fb){
     /* controls */
@@ -1598,7 +1601,7 @@ function mobileSheet(q, multi, expert, twoPhase, need){
     + '<div style="height:4px;background:var(--line);border-radius:2px;margin-top:8px;overflow:hidden"><div style="height:4px;background:var(--green);width:'+progress+'%"></div></div>'
     + '<div class="mono" style="font-size:12px;color:var(--green);margin-top:16px">'+(multi?'Prove':(expert?'Recall':'Locate'))+(twoPhase?' · registry search':'')+'</div>'
     + '<div style="font-size:24px;line-height:30px;font-weight:600;color:var(--ink);margin-top:3px">'+E(q.name)+'</div>'
-    + (matchActive() ? '' : '<div style="font-size:16px;line-height:23px;color:var(--muted);margin-top:6px">'+E(q.sub)+'</div>')
+    + (matchActive()||isRecall() ? '' : '<div style="font-size:16px;line-height:23px;color:var(--muted);margin-top:6px">'+E(q.sub)+'</div>')
     + (twoPhase?'<div style="font-size:14px;color:#666;margin-top:10px">Step '+S.phase+' of 2 — '+(S.phase===1?'find and open the hive file in the explorer.':'navigate the opened hive to the key.')+'</div>':'')
     + (multi?'<div class="mono" style="font-size:12px;color:var(--grey);margin-top:16px">logged evidence · '+S.found.length+'/'+need+'</div>'+slots:'')
     + hintBlock
@@ -1938,8 +1941,11 @@ document.getElementById('app').addEventListener('click', e => {
     case 'start': {
       const pool = isMulti()?SCEN():catArt();
       if (pool.length === 0) break;
-      setState({screen:'game', queue: buildQueue(), idx:0, score:0, log:[], cwd:[], selected:null, typed:'', hintShown:false, fb:null, history:[], found:[], wrong:0, flash:null,
-        phase:1, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, more:null, sheet:false, peek:false, matching:false, matchPicks:null, matchWrong:0});
+      const q = buildQueue();
+      const patch = {screen:'game', queue:q, idx:0, score:0, log:[], cwd:[], selected:null, typed:'', hintShown:false, fb:null, history:[], found:[], wrong:0, flash:null,
+        phase:1, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, more:null, sheet:false, peek:false, matching:false, matchPicks:null, matchWrong:0};
+      if (isRecall() && q.length){ patch.matching = true; patch.matchPicks = buildMatchPicks(q[0]); }
+      setState(patch);
       break;
     }
     case 'quit': setState({screen:'done', fb:null}); break;
@@ -1948,8 +1954,10 @@ document.getElementById('app').addEventListener('click', e => {
       const missed = [], seen = {};
       S.log.forEach(l => { if (!l.ok && l.id && !seen[l.id]){ seen[l.id]=1; missed.push(l.id); } });
       if (!missed.length) break;
-      setState({screen:'game', queue: missed, idx:0, score:0, log:[], cwd:[], selected:null, typed:'', hintShown:false, fb:null, history:[], found:[], wrong:0, flash:null,
-        phase:1, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, more:null, sheet:false, peek:false, matching:false, matchPicks:null, matchWrong:0});
+      const patch = {screen:'game', queue: missed, idx:0, score:0, log:[], cwd:[], selected:null, typed:'', hintShown:false, fb:null, history:[], found:[], wrong:0, flash:null,
+        phase:1, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, more:null, sheet:false, peek:false, matching:false, matchPicks:null, matchWrong:0};
+      if (isRecall()){ patch.matching = true; patch.matchPicks = buildMatchPicks(missed[0]); }
+      setState(patch);
       break;
     }
     case 'nav': navigate(el.getAttribute('data-segs') ? el.getAttribute('data-segs').split('/') : []); break;
@@ -2028,9 +2036,12 @@ document.getElementById('app').addEventListener('click', e => {
       else gradeSingle(false);
       break;
     case 'next': {
-      if (S.idx >= S.queue.length-1) setState({screen:'done', fb:null, sheet:false, peek:false});
-      else setState({idx:S.idx+1, fb:null, selected:null, typed:'', hintShown:false, found:[], wrong:0, flash:null,
-        phase:1, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, more:null, sheet:false, peek:false, matching:false, matchPicks:null, matchWrong:0});
+      if (S.idx >= S.queue.length-1) { setState({screen:'done', fb:null, sheet:false, peek:false}); break; }
+      const ni = S.idx+1;
+      const patch = {idx:ni, fb:null, selected:null, typed:'', hintShown:false, found:[], wrong:0, flash:null,
+        phase:1, rCwd:[], rHistory:[], rExpanded:{}, rSelected:null, more:null, sheet:false, peek:false, matching:false, matchPicks:null, matchWrong:0};
+      if (isRecall()){ patch.matching = true; patch.matchPicks = buildMatchPicks(S.queue[ni]); }
+      setState(patch);
       break;
     }
   }
